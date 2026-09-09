@@ -194,7 +194,7 @@ app.post('/api/articles/:slug/comments', async (req, res) => {
   const body = String(req.body.body || '').trim().slice(0, 2000);
   const parentId = req.body.parent_id ? Number(req.body.parent_id) : null;
   const parent = article && parentId ? db.prepare('SELECT id, author_name, author_email, body FROM comments WHERE id = ? AND article_id = ?').get(parentId, article.id) : null;
-  if (!article || !name || !body || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) || (parentId && !parent)) return res.status(400).json({ error: 'Commentaire invalide' });
+  if (!article || !name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !body || (parentId && !parent)) return res.status(400).json({ error: 'Nom, email et commentaire valides requis' });
   const result = db.prepare('INSERT INTO comments (article_id, author_name, author_email, body, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(article.id, name, email, body, parentId, now());
   if (process.env.RESEND_API_KEY && (process.env.CONTACT_EMAIL || (parent && parent.author_email))) {
     const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
