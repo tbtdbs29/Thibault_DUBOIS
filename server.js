@@ -422,4 +422,5 @@ app.post('/api/admin/documents/:id/send', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
+app.use((req, res) => res.status(404).sendFile(path.join(__dirname, '404.html')));
 app.listen(port, () => console.log(`Railway server listening on port ${port}`));

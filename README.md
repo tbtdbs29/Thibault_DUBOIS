@@ -22,7 +22,7 @@ Le site est en **HTML/CSS/JS statique pur** (aucun framework, aucun build) : c'e
 
 ## Avant la mise en ligne
 
-1. **Nom de domaine** : remplacez `https://www.thibault-dubois.dev` par votre vrai domaine dans toutes les balises `<link rel="canonical">`, `og:url`, `sitemap.xml` et `robots.txt` (recherche/remplace global).
+1. ~~**Nom de domaine**~~ Fait — le domaine `tdubois.fr` est en place dans les balises `<link rel="canonical">`, `og:url`, `sitemap.xml` et `robots.txt`.
 2. **Mentions légales** (`mentions-legales.html`) : complétez les champs `[...]` (adresse complète, numéro SIRET, email professionnel, hébergeur) — obligatoire légalement pour une activité d'auto-entrepreneur en France.
 3. **Image de partage (Open Graph)** : ajoutez une vraie image (`assets/img/og-image.jpg`, 1200×630px) et référencez-la dans les balises `og:image` de chaque page pour un meilleur rendu au partage sur les réseaux sociaux.
 4. **Adresse email de contact** : dans `mentions-legales.html`, renseignez votre email professionnel (ne pas utiliser un email d'employeur pour une activité freelance).
