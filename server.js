@@ -34,9 +34,11 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT, article_id INTEGER NOT NULL, author_name TEXT NOT NULL,
     author_email TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE
+    parent_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
+    FOREIGN KEY(parent_id) REFERENCES comments(id) ON DELETE CASCADE
   );
 `);
+try { db.exec('ALTER TABLE comments ADD COLUMN parent_id INTEGER'); } catch (error) {}
 try { db.exec("ALTER TABLE articles ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1"); } catch (error) {}
 try { db.exec("ALTER TABLE articles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''"); } catch (error) {}
 try { db.exec("ALTER TABLE articles ADD COLUMN faq_json TEXT NOT NULL DEFAULT '[]'"); } catch (error) {}
@@ -182,17 +184,25 @@ app.get('/api/articles', (req, res) => {
 app.get('/api/articles/:slug', (req, res) => {
   const article = db.prepare("SELECT * FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
   if (!article) return res.status(404).json({ error: 'Article introuvable' });
-  const comments = db.prepare("SELECT id, author_name, body, created_at FROM comments WHERE article_id = ? AND status = 'approved' ORDER BY created_at DESC").all(article.id);
+  const comments = db.prepare("SELECT id, parent_id, author_name, body, created_at FROM comments WHERE article_id = ? AND status = 'approved' ORDER BY created_at ASC").all(article.id);
   res.json({ ...article, faq: JSON.parse(article.faq_json || '[]'), comments });
 });
-app.post('/api/articles/:slug/comments', (req, res) => {
+app.post('/api/articles/:slug/comments', async (req, res) => {
   const article = db.prepare("SELECT id FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
   const name = String(req.body.author_name || '').trim().slice(0, 80);
   const email = String(req.body.author_email || '').trim().slice(0, 200);
   const body = String(req.body.body || '').trim().slice(0, 2000);
-  if (!article || !name || !body || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return res.status(400).json({ error: 'Commentaire invalide' });
-  db.prepare('INSERT INTO comments (article_id, author_name, author_email, body, created_at) VALUES (?, ?, ?, ?, ?)').run(article.id, name, email, body, now());
-  res.status(201).json({ ok: true, message: 'Votre commentaire sera visible après modération.' });
+  const parentId = req.body.parent_id ? Number(req.body.parent_id) : null;
+  const parent = parentId ? db.prepare('SELECT id FROM comments WHERE id = ? AND article_id = ?').get(parentId, article.id) : null;
+  if (!article || !name || !body || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) || (parentId && !parent)) return res.status(400).json({ error: 'Commentaire invalide' });
+  const result = db.prepare('INSERT INTO comments (article_id, author_name, author_email, body, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(article.id, name, email, body, parentId, now());
+  if (process.env.RESEND_API_KEY && process.env.CONTACT_EMAIL) {
+    const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    const articleData = db.prepare('SELECT title FROM articles WHERE id = ?').get(article.id);
+    const kind = parentId ? 'une réponse à un commentaire' : 'un nouveau commentaire';
+    fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev', to: [process.env.CONTACT_EMAIL], reply_to: email || undefined, subject: `Nouveau commentaire — ${articleData.title}`, html: `<p>Bonjour,</p><p>${escapeEmail(name)} a publié ${kind} sur l'article <strong>${escapeEmail(articleData.title)}</strong>.</p><blockquote>${escapeEmail(body)}</blockquote><p>Le commentaire est en attente de modération dans le back office.</p>` }) }).catch((error) => console.error('[comment-notification] email non envoyé:', error.message));
+  }
+  res.status(201).json({ ok: true, id: result.lastInsertRowid, message: 'Votre commentaire sera visible après modération.' });
 });
 
 app.post('/api/admin/login', async (req, res) => {
