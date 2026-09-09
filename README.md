@@ -27,9 +27,9 @@ Le site est en **HTML/CSS/JS statique pur** (aucun framework, aucun build) : c'e
 3. **Image de partage (Open Graph)** : ajoutez une vraie image (`assets/img/og-image.jpg`, 1200×630px) et référencez-la dans les balises `og:image` de chaque page pour un meilleur rendu au partage sur les réseaux sociaux.
 4. **Adresse email de contact** : dans `mentions-legales.html`, renseignez votre email professionnel (ne pas utiliser un email d'employeur pour une activité freelance).
 
-## Déploiement (recommandé : Vercel)
+## Déploiement historique (Vercel)
 
-Le site est un mélange de fichiers statiques + fonctions serverless (`/api`), ce que Vercel gère nativement sans configuration.
+Cette procédure correspond à l'ancien mode serverless. Pour la version actuelle avec back office, SQLite et paiements, utilisez la procédure Railway ci-dessous.
 
 1. Poussez ce dossier sur un dépôt GitHub (ex. sur votre compte [github.com/tbtdbs29](https://github.com/tbtdbs29)).
 2. Sur [vercel.com](https://vercel.com), importez le dépôt (« Add New... > Project »). Aucune configuration de build n'est nécessaire.
@@ -77,3 +77,17 @@ vercel dev
 - Site rapide : aucune dépendance JS lourde, polices avec `font-display: swap`, images en lazy loading.
 
 Pensez à créer/valider une fiche **Google Business Profile** (établissement local) : c'est ce qui influence le plus le référencement local une fois le site en ligne.
+
+## Déploiement Railway et back office
+
+Le projet peut désormais être déployé comme un service Node.js unique sur Railway. Le serveur écoute `PORT`, sert les pages statiques, expose les APIs publiques et protège le back office sur `/admin`.
+
+1. Créez un service Railway depuis ce dépôt et ajoutez un volume persistant monté sur `/data`.
+2. Configurez les variables de `.env.example`, au minimum `ADMIN_PASSWORD`, `SESSION_SECRET` et `RAILWAY_VOLUME_MOUNT_PATH=/data`.
+3. Ajoutez `RESEND_API_KEY`, `CONTACT_EMAIL` et `SEND_FROM_EMAIL` pour l'envoi des demandes et documents.
+4. Ajoutez `STRIPE_SECRET_KEY` et `STRIPE_WEBHOOK_SECRET` pour activer les liens de paiement. Le webhook Stripe doit pointer vers `/api/stripe/webhook`.
+5. Ouvrez `https://votre-domaine.fr/admin` pour gérer les articles, les statistiques, les devis et les factures.
+
+Le back office stocke les articles, visites et documents dans SQLite. Le volume Railway est indispensable pour conserver ces données lors des redéploiements. Les articles sont publiés via `/blog.html` et `/article.html?slug=...`, avec pagination automatique. Les images d'article sont stockées dans le volume et servies depuis `/uploads`.
+
+Pour les paiements, le statut d'une facture passe à `paid` uniquement après réception d'un webhook Stripe signé. Pour la production, utilisez un mot de passe administrateur long, un `SESSION_SECRET` aléatoire et un domaine HTTPS.

@@ -304,9 +304,13 @@ section { padding: 96px 0; }
 .rotator {
   display: inline-block;
   position: relative;
-  min-width: 1px;
+  min-width: 7.8ch;
+  height: 1.2em;
+  vertical-align: bottom;
+  overflow: hidden;
 }
 .rotator span {
+  display: block;
   background: var(--gradient-text);
   -webkit-background-clip: text;
   background-clip: text;
@@ -319,7 +323,9 @@ section { padding: 96px 0; }
   margin-bottom: 32px;
 }
 .hero-ctas { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 44px; }
-.hero-stats { display: flex; gap: 36px; flex-wrap: wrap; }
+.hero-stats { display: flex; gap: 36px; flex-wrap: nowrap; align-items: flex-start; }
+.hero-stat { min-width: 0; }
+.hero-stat > span { display: block; white-space: nowrap; }
 .hero-stat strong {
   display: block;
   font-family: var(--font-display);
@@ -660,7 +666,8 @@ section { padding: 96px 0; }
 }
 @media (max-width: 480px) {
   .footer-grid { grid-template-columns: 1fr; }
-  .hero-stats { gap: 24px; }
+  .hero-stats { gap: 16px; }
+  .hero-stat > span { font-size: 0.72rem; }
 }
 
 /* ---- Mobile nav drawer ---- */

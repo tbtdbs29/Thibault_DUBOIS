@@ -84,6 +84,7 @@
     var words = JSON.parse(rotator.getAttribute('data-rotator'));
     var idx = 0;
     var span = document.createElement('span');
+    span.className = 'rotator-word';
     span.textContent = words[0];
     rotator.appendChild(span);
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -104,6 +105,11 @@
       }, 2600);
     }
   }
+
+  /* ---- Privacy-friendly page analytics ---- */
+  try {
+    navigator.sendBeacon('/api/analytics', new Blob([JSON.stringify({ path: window.location.pathname, referrer: document.referrer })], { type: 'application/json' }));
+  } catch (e) {}
 
   /* ---- Active nav link ---- */
   var path = window.location.pathname.split('/').pop() || 'index.html';

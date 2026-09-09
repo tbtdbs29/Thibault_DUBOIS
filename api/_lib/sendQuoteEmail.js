@@ -10,7 +10,7 @@ async function sendQuoteEmail(quote) {
   const from = process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev';
 
   if (!apiKey || !to) {
-    console.log('[send-quote] RESEND_API_KEY ou CONTACT_EMAIL manquant — email non envoyé. Demande reçue :', quote);
+    console.warn('[send-quote] RESEND_API_KEY ou CONTACT_EMAIL manquant — email non envoyé.');
     return { sent: false, reason: 'not_configured' };
   }
 
