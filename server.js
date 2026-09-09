@@ -56,6 +56,41 @@ app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeader
 const now = () => new Date().toISOString();
 const slugify = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90);
 const adminPassword = () => process.env.ADMIN_PASSWORD || '';
+const starterArticles = [
+  {
+    slug: 'pourquoi-creer-un-site-web-pour-son-activite',
+    title: 'Pourquoi créer un site web pour son activité ?',
+    excerpt: 'Un site web professionnel aide à être trouvé, rassurer ses prospects et présenter clairement ses services.',
+    body: '<p>Un site web est souvent le premier point de contact entre une entreprise et un futur client. Il permet de présenter votre activité à toute heure, avec vos mots et votre identité.</p><h2>Être visible au bon moment</h2><p>Un site optimisé pour le référencement naturel peut apparaître lorsque vos clients recherchent précisément vos services. Il complète les réseaux sociaux, dont les publications sont rapidement remplacées.</p><h2>Rassurer et faciliter le contact</h2><p>Des informations claires, des réalisations et un formulaire simple donnent confiance. Le visiteur sait qui vous êtes, ce que vous proposez et comment vous joindre.</p><h2>Un outil qui évolue</h2><p>Un site peut commencer simplement puis accueillir un blog, un agenda, un espace client ou un back-office au fil du développement de votre activité.</p>',
+    seo: 'Création de site web professionnel : pourquoi se lancer ?'
+  },
+  {
+    slug: 'chatbot-personnalise-pour-entreprise',
+    title: 'Chatbot personnalisé : à quoi sert-il pour une entreprise ?',
+    excerpt: 'Un chatbot adapté à votre activité peut répondre aux questions fréquentes et qualifier les demandes, sans déshumaniser la relation.',
+    body: '<p>Un chatbot personnalisé ne se limite pas à répondre avec des phrases génériques. Il est configuré autour de vos prestations, de votre vocabulaire et des questions réelles de vos clients.</p><h2>Répondre immédiatement</h2><p>Horaires, tarifs indicatifs, zones d’intervention ou étapes d’un projet peuvent être expliqués même lorsque vous êtes indisponible.</p><h2>Qualifier les demandes</h2><p>Le chatbot peut recueillir les informations utiles avant un échange : type de projet, budget, délai et coordonnées. Vous gagnez du temps sans perdre le contact humain.</p><h2>Un accompagnement encadré</h2><p>Les réponses importantes doivent rester vérifiables et le visiteur doit toujours pouvoir demander un contact direct. L’objectif est d’aider, pas de remplacer votre expertise.</p>',
+    seo: 'Chatbot personnalisé pour entreprise : usages et avantages'
+  },
+  {
+    slug: 'ux-ui-difference-experience-interface',
+    title: 'UX et UI : comprendre la différence pour un site plus efficace',
+    excerpt: 'L’UX et l’UI travaillent ensemble pour rendre un site agréable, compréhensible et simple à utiliser.',
+    body: '<p>UX signifie expérience utilisateur et UI signifie interface utilisateur. Ces deux disciplines sont complémentaires, mais elles ne désignent pas la même chose.</p><h2>L’UX organise le parcours</h2><p>L’UX cherche à comprendre les besoins, structurer les contenus et réduire les hésitations. Un bon parcours permet de trouver une information ou réaliser une action sans effort inutile.</p><h2>L’UI rend l’interface lisible</h2><p>L’UI concerne les couleurs, la typographie, les espacements, les boutons et les états visuels. Une interface cohérente aide l’utilisateur à comprendre ce qui est possible.</p><h2>Le résultat compte plus que l’effet</h2><p>Un design réussi ne cherche pas seulement à impressionner. Il guide, rassure et reste confortable sur mobile comme sur ordinateur.</p>',
+    seo: 'UX UI : différences et conseils pour un site web efficace'
+  },
+  {
+    slug: 'hebergement-nom-domaine-email-professionnel',
+    title: 'Hébergement, nom de domaine et email professionnel : les bases',
+    excerpt: 'Comprendre ces trois éléments permet de lancer un site fiable et de présenter une image professionnelle.',
+    body: '<p>Un projet web repose sur plusieurs briques souvent confondues : le nom de domaine, l’hébergement et l’adresse email professionnelle.</p><h2>Le nom de domaine</h2><p>C’est l’adresse que les visiteurs saisissent pour accéder au site. Elle doit être simple à retenir, cohérente avec votre activité et renouvelée chaque année.</p><h2>L’hébergement</h2><p>L’hébergement stocke les fichiers et fait fonctionner le site. Une solution comme Railway permet de déployer une application avec une base de données et des variables sécurisées.</p><h2>L’adresse email</h2><p>Une adresse liée au domaine renforce la confiance dans les échanges commerciaux. Elle peut être configurée avec le fournisseur adapté à vos besoins.</p>',
+    seo: 'Hébergement, nom de domaine et email professionnel : guide'
+  }
+];
+const insertStarterArticle = db.prepare('INSERT OR IGNORE INTO articles (slug, title, excerpt, body, seo_title, seo_description, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+starterArticles.forEach((article) => {
+  const timestamp = now();
+  insertStarterArticle.run(article.slug, article.title, article.excerpt, article.body, article.seo, article.excerpt, 'published', timestamp, timestamp, timestamp);
+});
 function requireAdmin(req, res, next) {
   if (req.session.admin) return next();
   return res.status(401).json({ error: 'Authentification requise' });

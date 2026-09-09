@@ -304,13 +304,15 @@ section { padding: 96px 0; }
 .rotator {
   display: inline-block;
   position: relative;
-  min-width: 7.8ch;
+  width: 23ch;
+  min-width: 23ch;
   height: 1.2em;
   vertical-align: bottom;
   overflow: hidden;
 }
 .rotator span {
   display: block;
+  white-space: nowrap;
   background: var(--gradient-text);
   -webkit-background-clip: text;
   background-clip: text;
@@ -365,6 +367,9 @@ section { padding: 96px 0; }
 .orbit-1 { top: 6%; left: 0%; animation-delay: 0s; }
 .orbit-2 { top: 40%; right: 0%; animation-delay: 1.2s; }
 .orbit-3 { bottom: 8%; left: 10%; animation-delay: 2.4s; }
+.orbit-4 { top: 18%; right: 2%; animation-delay: 3.6s; }
+.orbit-5 { bottom: 24%; right: -4%; animation-delay: 4.8s; }
+.orbit-6 { bottom: 0%; left: 0%; animation-delay: 6s; }
 @keyframes float-card {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-14px); }
@@ -668,6 +673,7 @@ section { padding: 96px 0; }
   .footer-grid { grid-template-columns: 1fr; }
   .hero-stats { gap: 16px; }
   .hero-stat > span { font-size: 0.72rem; }
+  .rotator { width: 23ch; min-width: 23ch; font-size: .82em; }
 }
 
 /* ---- Mobile nav drawer ---- */
