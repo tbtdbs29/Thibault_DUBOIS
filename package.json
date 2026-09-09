@@ -1,0 +1,15 @@
+{
+  "name": "thibault-dubois-site",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Site vitrine + chatbot IA pour Thibault Dubois, développeur web freelance (Brest, Bretagne)",
+  "scripts": {
+    "dev": "npx serve . -l 3000"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
