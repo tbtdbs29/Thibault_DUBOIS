@@ -287,7 +287,8 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${filename}"`);
   pdf.pipe(res);
-  const primary = '#ef5f86';
+  // Purple identifies quotes; the darker teal keeps white text readable on invoices.
+  const primary = document.type === 'invoice' ? '#087f86' : '#6246d9';
   const dark = '#1e2430';
   const muted = '#657084';
   const light = '#f1f3f6';
