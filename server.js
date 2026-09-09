@@ -195,7 +195,10 @@ app.post('/api/admin/login', async (req, res) => {
   const valid = configured.startsWith('$2') ? await bcrypt.compare(String(req.body.password || ''), configured) : String(req.body.password || '') === configured;
   if (!valid) return res.status(401).json({ error: 'Mot de passe incorrect' });
   req.session.admin = true;
-  res.json({ ok: true });
+  req.session.save((error) => {
+    if (error) return res.status(500).json({ error: 'Session impossible à enregistrer' });
+    res.json({ ok: true });
+  });
 });
 app.post('/api/admin/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
 app.get('/api/admin/me', requireAdmin, (req, res) => res.json({ authenticated: true }));
