@@ -30,6 +30,11 @@ db.exec(`
     customer_email TEXT NOT NULL, total_cents INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'draft',
     data TEXT NOT NULL DEFAULT '{}', stripe_session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, article_id INTEGER NOT NULL, author_name TEXT NOT NULL,
+    author_email TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE
+  );
 `);
 
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
@@ -60,6 +65,7 @@ const starterArticles = [
   {
     slug: 'pourquoi-creer-un-site-web-pour-son-activite',
     title: 'Pourquoi créer un site web pour son activité ?',
+    image: '/assets/img/article-site-web.svg',
     excerpt: 'Un site web professionnel aide à être trouvé, rassurer ses prospects et présenter clairement ses services.',
     body: '<p>Un site web est souvent le premier point de contact entre une entreprise et un futur client. Il permet de présenter votre activité à toute heure, avec vos mots et votre identité.</p><h2>Être visible au bon moment</h2><p>Un site optimisé pour le référencement naturel peut apparaître lorsque vos clients recherchent précisément vos services. Il complète les réseaux sociaux, dont les publications sont rapidement remplacées.</p><h2>Rassurer et faciliter le contact</h2><p>Des informations claires, des réalisations et un formulaire simple donnent confiance. Le visiteur sait qui vous êtes, ce que vous proposez et comment vous joindre.</p><h2>Un outil qui évolue</h2><p>Un site peut commencer simplement puis accueillir un blog, un agenda, un espace client ou un back-office au fil du développement de votre activité.</p>',
     seo: 'Création de site web professionnel : pourquoi se lancer ?'
@@ -67,6 +73,7 @@ const starterArticles = [
   {
     slug: 'chatbot-personnalise-pour-entreprise',
     title: 'Chatbot personnalisé : à quoi sert-il pour une entreprise ?',
+    image: '/assets/img/article-chatbot.svg',
     excerpt: 'Un chatbot adapté à votre activité peut répondre aux questions fréquentes et qualifier les demandes, sans déshumaniser la relation.',
     body: '<p>Un chatbot personnalisé ne se limite pas à répondre avec des phrases génériques. Il est configuré autour de vos prestations, de votre vocabulaire et des questions réelles de vos clients.</p><h2>Répondre immédiatement</h2><p>Horaires, tarifs indicatifs, zones d’intervention ou étapes d’un projet peuvent être expliqués même lorsque vous êtes indisponible.</p><h2>Qualifier les demandes</h2><p>Le chatbot peut recueillir les informations utiles avant un échange : type de projet, budget, délai et coordonnées. Vous gagnez du temps sans perdre le contact humain.</p><h2>Un accompagnement encadré</h2><p>Les réponses importantes doivent rester vérifiables et le visiteur doit toujours pouvoir demander un contact direct. L’objectif est d’aider, pas de remplacer votre expertise.</p>',
     seo: 'Chatbot personnalisé pour entreprise : usages et avantages'
@@ -74,6 +81,7 @@ const starterArticles = [
   {
     slug: 'ux-ui-difference-experience-interface',
     title: 'UX et UI : comprendre la différence pour un site plus efficace',
+    image: '/assets/img/article-ux-ui.svg',
     excerpt: 'L’UX et l’UI travaillent ensemble pour rendre un site agréable, compréhensible et simple à utiliser.',
     body: '<p>UX signifie expérience utilisateur et UI signifie interface utilisateur. Ces deux disciplines sont complémentaires, mais elles ne désignent pas la même chose.</p><h2>L’UX organise le parcours</h2><p>L’UX cherche à comprendre les besoins, structurer les contenus et réduire les hésitations. Un bon parcours permet de trouver une information ou réaliser une action sans effort inutile.</p><h2>L’UI rend l’interface lisible</h2><p>L’UI concerne les couleurs, la typographie, les espacements, les boutons et les états visuels. Une interface cohérente aide l’utilisateur à comprendre ce qui est possible.</p><h2>Le résultat compte plus que l’effet</h2><p>Un design réussi ne cherche pas seulement à impressionner. Il guide, rassure et reste confortable sur mobile comme sur ordinateur.</p>',
     seo: 'UX UI : différences et conseils pour un site web efficace'
@@ -81,15 +89,17 @@ const starterArticles = [
   {
     slug: 'hebergement-nom-domaine-email-professionnel',
     title: 'Hébergement, nom de domaine et email professionnel : les bases',
+    image: '/assets/img/article-hebergement.svg',
     excerpt: 'Comprendre ces trois éléments permet de lancer un site fiable et de présenter une image professionnelle.',
     body: '<p>Un projet web repose sur plusieurs briques souvent confondues : le nom de domaine, l’hébergement et l’adresse email professionnelle.</p><h2>Le nom de domaine</h2><p>C’est l’adresse que les visiteurs saisissent pour accéder au site. Elle doit être simple à retenir, cohérente avec votre activité et renouvelée chaque année.</p><h2>L’hébergement</h2><p>L’hébergement stocke les fichiers et fait fonctionner le site. Une solution comme Railway permet de déployer une application avec une base de données et des variables sécurisées.</p><h2>L’adresse email</h2><p>Une adresse liée au domaine renforce la confiance dans les échanges commerciaux. Elle peut être configurée avec le fournisseur adapté à vos besoins.</p>',
     seo: 'Hébergement, nom de domaine et email professionnel : guide'
   }
 ];
-const insertStarterArticle = db.prepare('INSERT OR IGNORE INTO articles (slug, title, excerpt, body, seo_title, seo_description, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+const insertStarterArticle = db.prepare('INSERT OR IGNORE INTO articles (slug, title, excerpt, body, cover_image, seo_title, seo_description, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 starterArticles.forEach((article) => {
   const timestamp = now();
-  insertStarterArticle.run(article.slug, article.title, article.excerpt, article.body, article.seo, article.excerpt, 'published', timestamp, timestamp, timestamp);
+  insertStarterArticle.run(article.slug, article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, 'published', timestamp, timestamp, timestamp);
+  db.prepare("UPDATE articles SET cover_image = ? WHERE slug = ? AND (cover_image = '' OR cover_image IS NULL)").run(article.image, article.slug);
 });
 function requireAdmin(req, res, next) {
   if (req.session.admin) return next();
@@ -132,14 +142,24 @@ app.get('/api/articles', (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(12, Math.max(1, Number(req.query.limit) || 6));
   const offset = (page - 1) * limit;
-  const items = db.prepare("SELECT id, slug, title, excerpt, cover_image, published_at FROM articles WHERE status = 'published' ORDER BY published_at DESC LIMIT ? OFFSET ?").all(limit, offset);
-  const total = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE status = 'published'").get().count;
+  const items = db.prepare("SELECT id, slug, title, excerpt, cover_image, published_at FROM articles WHERE status = 'published' AND published_at <= ? ORDER BY published_at DESC LIMIT ? OFFSET ?").all(now(), limit, offset);
+  const total = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE status = 'published' AND published_at <= ?").get(now()).count;
   res.json({ items, page, pages: Math.max(1, Math.ceil(total / limit)), total });
 });
 app.get('/api/articles/:slug', (req, res) => {
-  const article = db.prepare("SELECT * FROM articles WHERE slug = ? AND status = 'published'").get(req.params.slug);
+  const article = db.prepare("SELECT * FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
   if (!article) return res.status(404).json({ error: 'Article introuvable' });
-  res.json(article);
+  const comments = db.prepare("SELECT id, author_name, body, created_at FROM comments WHERE article_id = ? AND status = 'approved' ORDER BY created_at DESC").all(article.id);
+  res.json({ ...article, comments });
+});
+app.post('/api/articles/:slug/comments', (req, res) => {
+  const article = db.prepare("SELECT id FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
+  const name = String(req.body.author_name || '').trim().slice(0, 80);
+  const email = String(req.body.author_email || '').trim().slice(0, 200);
+  const body = String(req.body.body || '').trim().slice(0, 2000);
+  if (!article || !name || !body || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return res.status(400).json({ error: 'Commentaire invalide' });
+  db.prepare('INSERT INTO comments (article_id, author_name, author_email, body, created_at) VALUES (?, ?, ?, ?, ?)').run(article.id, name, email, body, now());
+  res.status(201).json({ ok: true, message: 'Votre commentaire sera visible après modération.' });
 });
 
 app.post('/api/admin/login', async (req, res) => {
@@ -163,6 +183,13 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/articles', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM articles ORDER BY updated_at DESC').all()));
+app.get('/api/admin/comments', requireAdmin, (req, res) => res.json(db.prepare('SELECT comments.*, articles.title AS article_title FROM comments JOIN articles ON articles.id = comments.article_id ORDER BY comments.created_at DESC').all()));
+app.put('/api/admin/comments/:id', requireAdmin, (req, res) => {
+  const status = ['pending', 'approved', 'rejected'].includes(req.body.status) ? req.body.status : 'pending';
+  db.prepare('UPDATE comments SET status = ? WHERE id = ?').run(status, req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/admin/comments/:id', requireAdmin, (req, res) => { db.prepare('DELETE FROM comments WHERE id = ?').run(req.params.id); res.status(204).end(); });
 app.post('/api/admin/articles', requireAdmin, (req, res) => {
   const title = String(req.body.title || '').trim();
   if (!title) return res.status(400).json({ error: 'Le titre est obligatoire' });
@@ -170,7 +197,7 @@ app.post('/api/admin/articles', requireAdmin, (req, res) => {
   const slug = slugify(req.body.slug || title);
   try {
     const result = db.prepare(`INSERT INTO articles (slug, title, excerpt, body, cover_image, seo_title, seo_description, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(slug, title, String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || title), String(req.body.seo_description || req.body.excerpt || ''), req.body.status === 'published' ? 'published' : 'draft', req.body.status === 'published' ? timestamp : null, timestamp, timestamp);
+      .run(slug, title, String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || title), String(req.body.seo_description || req.body.excerpt || ''), req.body.status === 'published' ? 'published' : 'draft', req.body.published_at ? new Date(req.body.published_at).toISOString() : (req.body.status === 'published' ? timestamp : null), timestamp, timestamp);
     res.status(201).json(db.prepare('SELECT * FROM articles WHERE id = ?').get(result.lastInsertRowid));
   } catch (error) { res.status(409).json({ error: 'Ce slug existe déjà' }); }
 });
@@ -178,7 +205,7 @@ app.put('/api/admin/articles/:id', requireAdmin, (req, res) => {
   const current = db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id);
   if (!current) return res.status(404).json({ error: 'Article introuvable' });
   const status = req.body.status === 'published' ? 'published' : 'draft';
-  const publishedAt = status === 'published' ? (current.published_at || now()) : null;
+  const publishedAt = req.body.published_at ? new Date(req.body.published_at).toISOString() : (status === 'published' ? (current.published_at || now()) : null);
   db.prepare(`UPDATE articles SET slug = ?, title = ?, excerpt = ?, body = ?, cover_image = ?, seo_title = ?, seo_description = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?`)
     .run(slugify(req.body.slug || req.body.title), String(req.body.title || ''), String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || req.body.title || ''), String(req.body.seo_description || req.body.excerpt || ''), status, publishedAt, now(), req.params.id);
   res.json(db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id));
@@ -202,8 +229,29 @@ app.post('/api/admin/documents', requireAdmin, (req, res) => {
   const totalCents = Math.round(Number(req.body.total || 0) * 100);
   if (!customerName || !customerEmail || totalCents < 0) return res.status(400).json({ error: 'Client, email et montant requis' });
   const timestamp = now();
-  const data = JSON.stringify({ lines: Array.isArray(req.body.lines) ? req.body.lines : [], notes: String(req.body.notes || '') });
-  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, totalCents, data, timestamp, timestamp);
+  const lines = Array.isArray(req.body.lines) ? req.body.lines.map((line) => ({ description: String(line.description || '').slice(0, 200), quantity: Math.max(0, Number(line.quantity) || 0), unit_price_cents: Math.max(0, Math.round(Number(line.unit_price || 0) * 100)) })).filter((line) => line.description && line.quantity > 0) : [];
+  const calculatedTotal = lines.reduce((sum, line) => sum + line.quantity * line.unit_price_cents, 0);
+  const data = JSON.stringify({ lines, notes: String(req.body.notes || ''), client_address: String(req.body.client_address || ''), owner_name: String(req.body.owner_name || 'Thibault Dubois'), owner_address: String(req.body.owner_address || ''), owner_email: String(req.body.owner_email || '') });
+  const finalTotal = calculatedTotal || totalCents;
+  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, finalTotal, data, timestamp, timestamp);
+  res.status(201).json(db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid));
+});
+app.put('/api/admin/documents/:id', requireAdmin, (req, res) => {
+  const existing = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+  const lines = Array.isArray(req.body.lines) ? req.body.lines.map((line) => ({ description: String(line.description || '').slice(0, 200), quantity: Math.max(0, Number(line.quantity) || 0), unit_price_cents: Math.max(0, Math.round(Number(line.unit_price || 0) * 100)) })).filter((line) => line.description && line.quantity > 0) : [];
+  const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price_cents, 0);
+  const data = JSON.stringify({ lines, notes: String(req.body.notes || ''), client_address: String(req.body.client_address || ''), owner_name: String(req.body.owner_name || 'Thibault Dubois'), owner_address: String(req.body.owner_address || ''), owner_email: String(req.body.owner_email || '') });
+  db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), total, data, now(), req.params.id);
+  res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
+});
+app.delete('/api/admin/documents/:id', requireAdmin, (req, res) => { db.prepare('DELETE FROM documents WHERE id = ? AND type = \'quote\'').run(req.params.id); res.status(204).end(); });
+app.post('/api/admin/documents/:id/convert', requireAdmin, (req, res) => {
+  const quote = db.prepare("SELECT * FROM documents WHERE id = ? AND type = 'quote'").get(req.params.id);
+  if (!quote) return res.status(404).json({ error: 'Devis introuvable' });
+  const timestamp = now();
+  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run('invoice', documentNumber('invoice'), quote.customer_name, quote.customer_email, quote.total_cents, quote.data, 'draft', timestamp, timestamp);
+  db.prepare("UPDATE documents SET status = 'converted', updated_at = ? WHERE id = ?").run(timestamp, quote.id);
   res.status(201).json(db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid));
 });
 app.post('/api/admin/documents/:id/payment-link', requireAdmin, async (req, res) => {
@@ -221,7 +269,11 @@ app.post('/api/admin/documents/:id/send', requireAdmin, async (req, res) => {
   const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
   if (!document) return res.status(404).json({ error: 'Document introuvable' });
   const kind = document.type === 'invoice' ? 'facture' : 'devis';
-  const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `${kind[0].toUpperCase() + kind.slice(1)} ${document.number}`, html: `<p>Bonjour ${document.customer_name},</p><p>Vous trouverez votre ${kind} <strong>${document.number}</strong> d'un montant de <strong>${(document.total_cents / 100).toFixed(2)} €</strong>.</p><p>Merci,<br>Thibault Dubois</p>` }) });
+  const details = JSON.parse(document.data || '{}');
+  const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+  const lines = (details.lines || []).map((line) => `<tr><td>${escapeEmail(line.description)}</td><td>${line.quantity}</td><td>${(line.unit_price_cents / 100).toFixed(2)} €</td><td>${(line.quantity * line.unit_price_cents / 100).toFixed(2)} €</td></tr>`).join('');
+  const html = `<p>Bonjour ${escapeEmail(document.customer_name)},</p><p>${kind[0].toUpperCase() + kind.slice(1)} <strong>${document.number}</strong></p><p><strong>Client :</strong><br>${escapeEmail(details.client_address)}</p><p><strong>Prestataire :</strong><br>${escapeEmail(details.owner_name)}<br>${escapeEmail(details.owner_address)}<br>${escapeEmail(details.owner_email)}</p><table border="1" cellpadding="8" cellspacing="0"><thead><tr><th>Prestation</th><th>Qté</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>${lines}</tbody><tfoot><tr><th colspan="3">Total</th><th>${(document.total_cents / 100).toFixed(2)} €</th></tr></tfoot></table><p>${escapeEmail(details.notes)}</p><p>Merci,<br>Thibault Dubois</p>`;
+  const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `${kind[0].toUpperCase() + kind.slice(1)} ${document.number}`, html }) });
   if (!response.ok) return res.status(502).json({ error: 'Envoi email impossible' });
   db.prepare("UPDATE documents SET status = 'sent', updated_at = ? WHERE id = ?").run(now(), document.id);
   res.json({ ok: true });
