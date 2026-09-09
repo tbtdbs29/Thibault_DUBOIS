@@ -112,6 +112,32 @@ function documentNumber(type) {
   const count = db.prepare('SELECT COUNT(*) AS count FROM documents WHERE type = ?').get(type).count + 1;
   return `${prefix}-${year}-${String(count).padStart(4, '0')}`;
 }
+function normalizeDocumentData(body) {
+  const lines = Array.isArray(body.lines) ? body.lines.map((line) => ({
+    description: String(line.description || '').slice(0, 200),
+    quantity: Math.max(0, Number(line.quantity) || 0),
+    unit_price_cents: Math.max(0, Math.round(Number(line.unit_price || 0) * 100)),
+    frequency: ['one_time', 'monthly', 'annual'].includes(line.frequency) ? line.frequency : 'one_time'
+  })).filter((line) => line.description && line.quantity > 0) : [];
+  const subtotalCents = lines.reduce((sum, line) => sum + line.quantity * line.unit_price_cents, 0);
+  const vatRate = Math.max(0, Math.min(100, Number(body.vat_rate) || 0));
+  const vatCents = Math.round(subtotalCents * vatRate / 100);
+  return {
+    lines,
+    subtotal_cents: subtotalCents,
+    vat_rate: vatRate,
+    vat_cents: vatCents,
+    total_cents: subtotalCents + vatCents,
+    client_address: String(body.client_address || ''),
+    owner_name: String(body.owner_name || 'Thibault Dubois'),
+    owner_address: String(body.owner_address || ''),
+    owner_email: String(body.owner_email || ''),
+    issue_date: String(body.issue_date || new Date().toISOString().slice(0, 10)),
+    due_days: Math.max(0, Number(body.due_days) || 30),
+    payment_terms: String(body.payment_terms || 'Paiement à réception de facture.'),
+    notes: String(body.notes || '')
+  };
+}
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'thibault-dubois' }));
 app.post('/api/send-quote', async (req, res) => {
@@ -227,23 +253,19 @@ app.post('/api/admin/documents', requireAdmin, (req, res) => {
   const type = req.body.type === 'invoice' ? 'invoice' : 'quote';
   const customerName = String(req.body.customer_name || '').trim();
   const customerEmail = String(req.body.customer_email || '').trim();
-  const totalCents = Math.round(Number(req.body.total || 0) * 100);
-  if (!customerName || !customerEmail || totalCents < 0) return res.status(400).json({ error: 'Client, email et montant requis' });
+  if (!customerName || !customerEmail) return res.status(400).json({ error: 'Client et email requis' });
   const timestamp = now();
-  const lines = Array.isArray(req.body.lines) ? req.body.lines.map((line) => ({ description: String(line.description || '').slice(0, 200), quantity: Math.max(0, Number(line.quantity) || 0), unit_price_cents: Math.max(0, Math.round(Number(line.unit_price || 0) * 100)) })).filter((line) => line.description && line.quantity > 0) : [];
-  const calculatedTotal = lines.reduce((sum, line) => sum + line.quantity * line.unit_price_cents, 0);
-  const data = JSON.stringify({ lines, notes: String(req.body.notes || ''), client_address: String(req.body.client_address || ''), owner_name: String(req.body.owner_name || 'Thibault Dubois'), owner_address: String(req.body.owner_address || ''), owner_email: String(req.body.owner_email || '') });
-  const finalTotal = calculatedTotal || totalCents;
-  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, finalTotal, data, timestamp, timestamp);
+  const details = normalizeDocumentData(req.body);
+  if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
+  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, details.total_cents, JSON.stringify(details), timestamp, timestamp);
   res.status(201).json(db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid));
 });
 app.put('/api/admin/documents/:id', requireAdmin, (req, res) => {
   const existing = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Document introuvable' });
-  const lines = Array.isArray(req.body.lines) ? req.body.lines.map((line) => ({ description: String(line.description || '').slice(0, 200), quantity: Math.max(0, Number(line.quantity) || 0), unit_price_cents: Math.max(0, Math.round(Number(line.unit_price || 0) * 100)) })).filter((line) => line.description && line.quantity > 0) : [];
-  const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price_cents, 0);
-  const data = JSON.stringify({ lines, notes: String(req.body.notes || ''), client_address: String(req.body.client_address || ''), owner_name: String(req.body.owner_name || 'Thibault Dubois'), owner_address: String(req.body.owner_address || ''), owner_email: String(req.body.owner_email || '') });
-  db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), total, data, now(), req.params.id);
+  const details = normalizeDocumentData(req.body);
+  if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
+  db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), details.total_cents, JSON.stringify(details), now(), req.params.id);
   res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
 });
 app.delete('/api/admin/documents/:id', requireAdmin, (req, res) => { db.prepare('DELETE FROM documents WHERE id = ? AND type = \'quote\'').run(req.params.id); res.status(204).end(); });
@@ -281,6 +303,7 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   pdf.font('Helvetica').fillColor(muted).text(document.customer_name, rightColumn, 172);
   pdf.text(document.customer_email, rightColumn, 188);
   pdf.text(details.client_address || '', rightColumn, 204);
+  pdf.fillColor(muted).fontSize(9).text(`Date : ${details.issue_date || new Date(document.created_at).toISOString().slice(0, 10)} · Échéance : ${details.due_days || 30} jours`, 52, 235);
   pdf.moveDown(3);
   const tableTop = pdf.y;
   pdf.fillColor(primary).rect(52, tableTop, 491, 25).fill();
@@ -289,18 +312,25 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   pdf.text('Prix unitaire', 395, tableTop + 8, { width: 70, align: 'right' });
   pdf.text('Total', 480, tableTop + 8, { width: 55, align: 'right' });
   let rowY = tableTop + 25;
+  const frequencyLabel = { one_time: 'Ponctuel', monthly: 'Mensuel', annual: 'Annuel' };
   (details.lines || []).forEach((line, index) => {
     if (index % 2 === 0) pdf.fillColor('#f5f7fb').rect(52, rowY, 491, 27).fill();
-    pdf.fillColor('#17202a').font('Helvetica').fontSize(10).text(String(line.description || ''), 62, rowY + 8, { width: 270 });
+    pdf.fillColor('#17202a').font('Helvetica').fontSize(10).text(`${String(line.description || '')} · ${frequencyLabel[line.frequency] || 'Ponctuel'}`, 62, rowY + 8, { width: 270 });
     pdf.text(String(line.quantity || 0), 350, rowY + 8, { width: 35, align: 'right' });
     pdf.text(`${((line.unit_price_cents || 0) / 100).toFixed(2)} EUR`, 395, rowY + 8, { width: 70, align: 'right' });
     pdf.text(`${(((line.unit_price_cents || 0) * (line.quantity || 0)) / 100).toFixed(2)} EUR`, 480, rowY + 8, { width: 55, align: 'right' });
     rowY += 27;
   });
   pdf.moveTo(52, rowY).lineTo(543, rowY).strokeColor('#dbe2ea').stroke();
-  pdf.fillColor('#17202a').font('Helvetica-Bold').fontSize(13).text('Total', 395, rowY + 15, { width: 70, align: 'right' });
-  pdf.fillColor(primary).text(`${(document.total_cents / 100).toFixed(2)} EUR`, 470, rowY + 15, { width: 73, align: 'right' });
-  if (details.notes) pdf.fillColor(muted).font('Helvetica').fontSize(10).text(`Notes : ${details.notes}`, 52, rowY + 60, { width: 491 });
+  const summaryY = rowY + 15;
+  pdf.fillColor(muted).font('Helvetica').fontSize(10).text('Sous-total HT', 395, summaryY, { width: 70, align: 'right' });
+  pdf.text(`${((details.subtotal_cents ?? document.total_cents) / 100).toFixed(2)} EUR`, 470, summaryY, { width: 73, align: 'right' });
+  pdf.text(`TVA ${Number(details.vat_rate || 0).toFixed(2)} %`, 395, summaryY + 17, { width: 70, align: 'right' });
+  pdf.text(`${((details.vat_cents || 0) / 100).toFixed(2)} EUR`, 470, summaryY + 17, { width: 73, align: 'right' });
+  pdf.fillColor('#17202a').font('Helvetica-Bold').fontSize(13).text('Total TTC', 395, summaryY + 39, { width: 70, align: 'right' });
+  pdf.fillColor(primary).text(`${(document.total_cents / 100).toFixed(2)} EUR`, 470, summaryY + 39, { width: 73, align: 'right' });
+  if (details.payment_terms) pdf.fillColor(muted).font('Helvetica').fontSize(10).text(`Conditions de paiement : ${details.payment_terms}`, 52, summaryY + 85, { width: 491 });
+  if (details.notes) pdf.fillColor(muted).font('Helvetica').fontSize(10).text(`Notes : ${details.notes}`, 52, summaryY + 105, { width: 491 });
   pdf.fillColor('#dbe2ea').rect(52, 755, 491, 1).fill();
   pdf.fillColor(muted).fontSize(9).text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} · Merci pour votre confiance`, 52, 768, { width: 491, align: 'center' });
   pdf.end();
