@@ -109,7 +109,12 @@ starterArticles.forEach((article) => {
 });
 const richArticles = require('./content/articles');
 const updateRichArticle = db.prepare('UPDATE articles SET title = ?, excerpt = ?, body = ?, cover_image = ?, seo_title = ?, seo_description = ?, keywords = ?, faq_json = ?, content_version = 2, updated_at = ? WHERE slug = ? AND content_version < 2');
-richArticles.forEach((article) => updateRichArticle.run(article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, article.keywords, JSON.stringify(article.faq), now(), article.slug));
+const moreArticles = require('./content/more-articles');
+const insertRichArticle = db.prepare('INSERT OR IGNORE INTO articles (slug, title, excerpt, body, cover_image, seo_title, seo_description, status, published_at, created_at, updated_at, content_version, keywords, faq_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?)');
+[...richArticles, ...moreArticles].forEach((article) => {
+  updateRichArticle.run(article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, article.keywords, JSON.stringify(article.faq), now(), article.slug);
+  insertRichArticle.run(article.slug, article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, 'published', now(), now(), now(), article.keywords, JSON.stringify(article.faq));
+});
 function requireAdmin(req, res, next) {
   if (req.session.admin) return next();
   return res.status(401).json({ error: 'Authentification requise' });
