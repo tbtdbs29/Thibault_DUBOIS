@@ -80,6 +80,8 @@ Pensez à créer/valider une fiche **Google Business Profile** (établissement l
 
 ## Déploiement Railway et back office
 
+Avant le lancement, consultez le [guide complet de lancement](GUIDE_AVANT_LANCEMENT.md), qui détaille les démarches administratives, la configuration Railway/Resend/Stripe, les tests et les obligations à vérifier.
+
 Le projet peut désormais être déployé comme un service Node.js unique sur Railway. Le serveur écoute `PORT`, sert les pages statiques, expose les APIs publiques et protège le back office sur `/admin`.
 
 1. Créez un service Railway depuis ce dépôt et ajoutez un volume persistant monté sur `/data`.
