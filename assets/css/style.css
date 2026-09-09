@@ -345,6 +345,7 @@ section { padding: 96px 0; }
 }
 .orbit-card {
   position: absolute;
+  z-index: 1;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -367,9 +368,6 @@ section { padding: 96px 0; }
 .orbit-1 { top: 6%; left: 0%; animation-delay: 0s; }
 .orbit-2 { top: 40%; right: 0%; animation-delay: 1.2s; }
 .orbit-3 { bottom: 8%; left: 10%; animation-delay: 2.4s; }
-.orbit-4 { top: 18%; right: 2%; animation-delay: 3.6s; }
-.orbit-5 { bottom: 24%; right: -4%; animation-delay: 4.8s; }
-.orbit-6 { bottom: 0%; left: 0%; animation-delay: 6s; }
 @keyframes float-card {
   0%, 100% { transform: translateY(0px); }
   50% { transform: translateY(-14px); }
@@ -381,6 +379,7 @@ section { padding: 96px 0; }
   background: var(--gradient-brand);
   box-shadow: var(--shadow-glow);
   position: relative;
+  z-index: 2;
   display: flex; align-items: center; justify-content: center;
   animation: core-spin 24s linear infinite;
 }
