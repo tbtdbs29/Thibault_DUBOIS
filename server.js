@@ -37,6 +37,9 @@ db.exec(`
     created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE
   );
 `);
+try { db.exec("ALTER TABLE articles ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1"); } catch (error) {}
+try { db.exec("ALTER TABLE articles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''"); } catch (error) {}
+try { db.exec("ALTER TABLE articles ADD COLUMN faq_json TEXT NOT NULL DEFAULT '[]'"); } catch (error) {}
 
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   if (!process.env.STRIPE_WEBHOOK_SECRET) return res.status(503).end();
@@ -102,6 +105,9 @@ starterArticles.forEach((article) => {
   insertStarterArticle.run(article.slug, article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, 'published', timestamp, timestamp, timestamp);
   db.prepare("UPDATE articles SET cover_image = ? WHERE slug = ? AND (cover_image = '' OR cover_image IS NULL)").run(article.image, article.slug);
 });
+const richArticles = require('./content/articles');
+const updateRichArticle = db.prepare('UPDATE articles SET title = ?, excerpt = ?, body = ?, cover_image = ?, seo_title = ?, seo_description = ?, keywords = ?, faq_json = ?, content_version = 2, updated_at = ? WHERE slug = ? AND content_version < 2');
+richArticles.forEach((article) => updateRichArticle.run(article.title, article.excerpt, article.body, article.image, article.seo, article.excerpt, article.keywords, JSON.stringify(article.faq), now(), article.slug));
 function requireAdmin(req, res, next) {
   if (req.session.admin) return next();
   return res.status(401).json({ error: 'Authentification requise' });
@@ -177,7 +183,7 @@ app.get('/api/articles/:slug', (req, res) => {
   const article = db.prepare("SELECT * FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
   if (!article) return res.status(404).json({ error: 'Article introuvable' });
   const comments = db.prepare("SELECT id, author_name, body, created_at FROM comments WHERE article_id = ? AND status = 'approved' ORDER BY created_at DESC").all(article.id);
-  res.json({ ...article, comments });
+  res.json({ ...article, faq: JSON.parse(article.faq_json || '[]'), comments });
 });
 app.post('/api/articles/:slug/comments', (req, res) => {
   const article = db.prepare("SELECT id FROM articles WHERE slug = ? AND status = 'published' AND published_at <= ?").get(req.params.slug, now());
