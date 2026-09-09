@@ -193,14 +193,18 @@ app.post('/api/articles/:slug/comments', async (req, res) => {
   const email = String(req.body.author_email || '').trim().slice(0, 200);
   const body = String(req.body.body || '').trim().slice(0, 2000);
   const parentId = req.body.parent_id ? Number(req.body.parent_id) : null;
-  const parent = parentId ? db.prepare('SELECT id FROM comments WHERE id = ? AND article_id = ?').get(parentId, article.id) : null;
+  const parent = article && parentId ? db.prepare('SELECT id, author_name, author_email, body FROM comments WHERE id = ? AND article_id = ?').get(parentId, article.id) : null;
   if (!article || !name || !body || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) || (parentId && !parent)) return res.status(400).json({ error: 'Commentaire invalide' });
   const result = db.prepare('INSERT INTO comments (article_id, author_name, author_email, body, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(article.id, name, email, body, parentId, now());
-  if (process.env.RESEND_API_KEY && process.env.CONTACT_EMAIL) {
+  if (process.env.RESEND_API_KEY && (process.env.CONTACT_EMAIL || (parent && parent.author_email))) {
     const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-    const articleData = db.prepare('SELECT title FROM articles WHERE id = ?').get(article.id);
+    const articleData = db.prepare('SELECT title, slug FROM articles WHERE id = ?').get(article.id);
     const kind = parentId ? 'une réponse à un commentaire' : 'un nouveau commentaire';
-    fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev', to: [process.env.CONTACT_EMAIL], reply_to: email || undefined, subject: `Nouveau commentaire — ${articleData.title}`, html: `<p>Bonjour,</p><p>${escapeEmail(name)} a publié ${kind} sur l'article <strong>${escapeEmail(articleData.title)}</strong>.</p><blockquote>${escapeEmail(body)}</blockquote><p>Le commentaire est en attente de modération dans le back office.</p>` }) }).catch((error) => console.error('[comment-notification] email non envoyé:', error.message));
+    const headers = { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' };
+    const sendEmail = (to, subject, html, replyTo) => fetch('https://api.resend.com/emails', { method: 'POST', headers, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev', to: [to], reply_to: replyTo || undefined, subject, html }) }).catch((error) => console.error('[comment-notification] email non envoyé:', error.message));
+    const articleUrl = `${process.env.PUBLIC_URL || `http://localhost:${port}`}/article.html?slug=${encodeURIComponent(articleData.slug)}#comments`;
+    if (process.env.CONTACT_EMAIL) sendEmail(process.env.CONTACT_EMAIL, `Nouveau commentaire — ${articleData.title}`, `<p>Bonjour,</p><p>${escapeEmail(name)} a publié ${kind} sur l'article <strong>${escapeEmail(articleData.title)}</strong>.</p><blockquote>${escapeEmail(body)}</blockquote><p>Le commentaire est en attente de modération dans le back office.</p><p><a href="${articleUrl}">Voir l'article et modérer le commentaire</a></p>`, email);
+    if (parent && parent.author_email) sendEmail(parent.author_email, `Une réponse à votre commentaire — ${articleData.title}`, `<p>Bonjour ${escapeEmail(parent.author_name)},</p><p><strong>${escapeEmail(name)}</strong> a répondu à votre commentaire sur l'article <strong>${escapeEmail(articleData.title)}</strong>.</p><p><strong>Votre commentaire :</strong></p><blockquote>${escapeEmail(parent.body)}</blockquote><p><strong>La réponse :</strong></p><blockquote>${escapeEmail(body)}</blockquote><p>La réponse sera visible après modération.</p><p><a href="${articleUrl}">Voir la conversation</a></p>`, email);
   }
   res.status(201).json({ ok: true, id: result.lastInsertRowid, message: 'Votre commentaire sera visible après modération.' });
 });
