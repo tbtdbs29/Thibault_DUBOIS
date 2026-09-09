@@ -267,17 +267,20 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   pdf.pipe(res);
   const primary = '#6246d9';
   const muted = '#64748b';
-  pdf.fillColor(primary).fontSize(25).font('Helvetica-Bold').text(kind, { align: 'right' });
-  pdf.fillColor('#17202a').fontSize(11).font('Helvetica').text(document.number, { align: 'right' });
+  pdf.fillColor(primary).roundedRect(52, 52, 491, 68, 8).fill();
+  pdf.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text(kind, 70, 70);
+  pdf.fontSize(11).font('Helvetica').text(document.number, 70, 99);
+  pdf.fillColor('#17202a').fontSize(10).font('Helvetica').text('THIBAULT DUBOIS', 410, 72, { width: 115, align: 'right' });
+  pdf.fillColor(muted).fontSize(9).text('Développement web freelance', 350, 91, { width: 175, align: 'right' });
   pdf.moveDown(2);
   pdf.fillColor('#17202a').fontSize(11).font('Helvetica-Bold').text(details.owner_name || 'Thibault Dubois');
   pdf.font('Helvetica').fillColor(muted).text(details.owner_address || '');
   pdf.text(details.owner_email || '');
   const rightColumn = 330;
-  pdf.fillColor('#17202a').font('Helvetica-Bold').text('Client', rightColumn, 143);
-  pdf.font('Helvetica').fillColor(muted).text(document.customer_name, rightColumn, 160);
-  pdf.text(document.customer_email, rightColumn);
-  pdf.text(details.client_address || '');
+  pdf.fillColor(primary).font('Helvetica-Bold').text('Client', rightColumn, 155);
+  pdf.font('Helvetica').fillColor(muted).text(document.customer_name, rightColumn, 172);
+  pdf.text(document.customer_email, rightColumn, 188);
+  pdf.text(details.client_address || '', rightColumn, 204);
   pdf.moveDown(3);
   const tableTop = pdf.y;
   pdf.fillColor(primary).rect(52, tableTop, 491, 25).fill();
@@ -298,7 +301,8 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   pdf.fillColor('#17202a').font('Helvetica-Bold').fontSize(13).text('Total', 395, rowY + 15, { width: 70, align: 'right' });
   pdf.fillColor(primary).text(`${(document.total_cents / 100).toFixed(2)} EUR`, 470, rowY + 15, { width: 73, align: 'right' });
   if (details.notes) pdf.fillColor(muted).font('Helvetica').fontSize(10).text(`Notes : ${details.notes}`, 52, rowY + 60, { width: 491 });
-  pdf.fillColor(muted).fontSize(9).text(`Document généré le ${new Date().toLocaleDateString('fr-FR')}`, 52, 760);
+  pdf.fillColor('#dbe2ea').rect(52, 755, 491, 1).fill();
+  pdf.fillColor(muted).fontSize(9).text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} · Merci pour votre confiance`, 52, 768, { width: 491, align: 'center' });
   pdf.end();
 });
 app.post('/api/admin/documents/:id/payment-link', requireAdmin, async (req, res) => {
