@@ -5,6 +5,7 @@ const MODEL = process.env.MODEL_NAME || 'claude-opus-5';
 const EFFORT = process.env.MODEL_EFFORT || 'low';
 // Les modèles "haiku" rejettent le paramètre effort (erreur 400 invalid_request_error)
 const SUPPORTS_EFFORT = !/haiku/i.test(MODEL);
+console.log(`[chat] module chargé — MODEL=${JSON.stringify(MODEL)} SUPPORTS_EFFORT=${SUPPORTS_EFFORT}`);
 const MAX_HISTORY_MESSAGES = 30;
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -87,14 +88,16 @@ module.exports = async function handler(req, res) {
   const client = new Anthropic();
 
   try {
-    const response = await client.messages.create({
+    const requestParams = {
       model: MODEL,
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
       ...(SUPPORTS_EFFORT ? { output_config: { effort: EFFORT } } : {}),
       messages
-    });
+    };
+    console.log(`[chat] appel Anthropic — model=${requestParams.model} output_config=${JSON.stringify(requestParams.output_config)}`);
+    const response = await client.messages.create(requestParams);
 
     const toolUse = response.content.find((b) => b.type === 'tool_use' && b.name === 'envoyer_demande_devis');
 

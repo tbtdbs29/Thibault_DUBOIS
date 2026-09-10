@@ -424,4 +424,4 @@ app.post('/api/admin/documents/:id/send', requireAdmin, async (req, res) => {
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, '404.html')));
-app.listen(port, () => console.log(`Railway server listening on port ${port}`));
+app.listen(port, () => console.log(`Railway server listening on port ${port} — build-marker: fix-trust-proxy-and-effort-2026-09-10`));
