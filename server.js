@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
+app.set('trust proxy', 1); // Railway termine le TLS en amont : nécessaire pour les cookies "secure"
 const port = Number(process.env.PORT || 3000);
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 const uploadDir = path.join(dataDir, 'uploads');

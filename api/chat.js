@@ -3,6 +3,8 @@ const { sendQuoteEmail } = require('./_lib/sendQuoteEmail');
 
 const MODEL = process.env.MODEL_NAME || 'claude-opus-5';
 const EFFORT = process.env.MODEL_EFFORT || 'low';
+// Les modèles "haiku" rejettent le paramètre effort (erreur 400 invalid_request_error)
+const SUPPORTS_EFFORT = !/haiku/i.test(MODEL);
 const MAX_HISTORY_MESSAGES = 30;
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -90,7 +92,7 @@ module.exports = async function handler(req, res) {
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
-      output_config: { effort: EFFORT },
+      ...(SUPPORTS_EFFORT ? { output_config: { effort: EFFORT } } : {}),
       messages
     });
 
@@ -127,7 +129,7 @@ module.exports = async function handler(req, res) {
         max_tokens: 512,
         system: SYSTEM_PROMPT,
         tools: TOOLS,
-        output_config: { effort: EFFORT },
+        ...(SUPPORTS_EFFORT ? { output_config: { effort: EFFORT } } : {}),
         messages: followupMessages
       });
 
