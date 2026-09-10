@@ -281,23 +281,33 @@ app.post('/api/admin/uploads', requireAdmin, upload.single('image'), (req, res) 
 
 app.get('/api/admin/documents', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM documents ORDER BY created_at DESC').all().map((item) => ({ ...item, data: JSON.parse(item.data) }))));
 app.post('/api/admin/documents', requireAdmin, (req, res) => {
-  const type = req.body.type === 'invoice' ? 'invoice' : 'quote';
-  const customerName = String(req.body.customer_name || '').trim();
-  const customerEmail = String(req.body.customer_email || '').trim();
-  if (!customerName || !customerEmail) return res.status(400).json({ error: 'Client et email requis' });
-  const timestamp = now();
-  const details = normalizeDocumentData(req.body);
-  if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
-  const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, details.total_cents, JSON.stringify(details), timestamp, timestamp);
-  res.status(201).json(db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid));
+  try {
+    const type = req.body.type === 'invoice' ? 'invoice' : 'quote';
+    const customerName = String(req.body.customer_name || '').trim();
+    const customerEmail = String(req.body.customer_email || '').trim();
+    if (!customerName || !customerEmail) return res.status(400).json({ error: 'Client et email requis' });
+    const timestamp = now();
+    const details = normalizeDocumentData(req.body);
+    if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
+    const result = db.prepare('INSERT INTO documents (type, number, customer_name, customer_email, total_cents, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(type, documentNumber(type), customerName, customerEmail, details.total_cents, JSON.stringify(details), timestamp, timestamp);
+    res.status(201).json(db.prepare('SELECT * FROM documents WHERE id = ?').get(result.lastInsertRowid));
+  } catch (error) {
+    console.error('[documents:create] error', error.message);
+    res.status(500).json({ error: "Le devis n'a pas pu être créé. Réessayez." });
+  }
 });
 app.put('/api/admin/documents/:id', requireAdmin, (req, res) => {
-  const existing = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Document introuvable' });
-  const details = normalizeDocumentData(req.body);
-  if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
-  db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), details.total_cents, JSON.stringify(details), now(), req.params.id);
-  res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
+  try {
+    const existing = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Document introuvable' });
+    const details = normalizeDocumentData(req.body);
+    if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
+    db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), details.total_cents, JSON.stringify(details), now(), req.params.id);
+    res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
+  } catch (error) {
+    console.error('[documents:update] error', error.message);
+    res.status(500).json({ error: "Le devis n'a pas pu être mis à jour. Réessayez." });
+  }
 });
 app.delete('/api/admin/documents/:id', requireAdmin, (req, res) => { db.prepare('DELETE FROM documents WHERE id = ? AND type = \'quote\'').run(req.params.id); res.status(204).end(); });
 app.post('/api/admin/documents/:id/convert', requireAdmin, (req, res) => {
@@ -384,46 +394,66 @@ app.get('/api/admin/documents/:id/pdf', requireAdmin, (req, res) => {
   pdf.end();
 });
 app.post('/api/admin/documents/:id/payment-link', requireAdmin, async (req, res) => {
-  if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'STRIPE_SECRET_KEY doit être configurée sur Railway' });
-  const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
-  if (!document) return res.status(404).json({ error: 'Document introuvable' });
-  const Stripe = require('stripe');
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-  const checkout = await stripe.checkout.sessions.create({ mode: 'payment', customer_email: document.customer_email, line_items: [{ price_data: { currency: 'eur', product_data: { name: `${document.type === 'invoice' ? 'Facture' : 'Devis'} ${document.number}` }, unit_amount: document.total_cents }, quantity: 1 }], success_url: `${process.env.PUBLIC_URL || ''}/paiement.html?success=1`, cancel_url: `${process.env.PUBLIC_URL || ''}/paiement.html?cancelled=1`, metadata: { document_id: String(document.id) } });
-  db.prepare('UPDATE documents SET stripe_session_id = ?, status = ?, updated_at = ? WHERE id = ?').run(checkout.id, 'sent', now(), document.id);
-  res.json({ url: checkout.url });
-});
-  app.post('/api/admin/documents/:id/payment-request', requireAdmin, async (req, res) => {
+  try {
     if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'STRIPE_SECRET_KEY doit être configurée sur Railway' });
-    if (!process.env.RESEND_API_KEY || !process.env.SEND_FROM_EMAIL) return res.status(503).json({ error: 'RESEND_API_KEY et SEND_FROM_EMAIL doivent être configurées sur Railway' });
     const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
     if (!document) return res.status(404).json({ error: 'Document introuvable' });
     const Stripe = require('stripe');
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
     const checkout = await stripe.checkout.sessions.create({ mode: 'payment', customer_email: document.customer_email, line_items: [{ price_data: { currency: 'eur', product_data: { name: `${document.type === 'invoice' ? 'Facture' : 'Devis'} ${document.number}` }, unit_amount: document.total_cents }, quantity: 1 }], success_url: `${process.env.PUBLIC_URL || ''}/paiement.html?success=1`, cancel_url: `${process.env.PUBLIC_URL || ''}/paiement.html?cancelled=1`, metadata: { document_id: String(document.id) } });
-    const details = JSON.parse(document.data || '{}');
-    const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-    const kind = document.type === 'invoice' ? 'facture' : 'document';
-    const html = `<p>Bonjour ${escapeEmail(document.customer_name)},</p><p>Votre ${kind} <strong>${escapeEmail(document.number)}</strong> est disponible.</p><p>Montant à régler : <strong>${(document.total_cents / 100).toFixed(2)} €</strong></p><p><a href="${checkout.url}" style="display:inline-block;padding:12px 18px;background:#6246d9;color:#fff;text-decoration:none;border-radius:6px">Régler en ligne</a></p><p>Le paiement est sécurisé par Stripe. Le détail du document peut être consulté depuis votre échange avec Thibault.</p><p>Merci,<br>${escapeEmail(details.owner_name || 'Thibault Dubois')}</p>`;
-    const emailResponse = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `Règlement ${document.number}`, html }) });
-    if (!emailResponse.ok) return res.status(502).json({ error: 'Le lien Stripe a été créé mais l’email n’a pas pu être envoyé' });
     db.prepare('UPDATE documents SET stripe_session_id = ?, status = ?, updated_at = ? WHERE id = ?').run(checkout.id, 'sent', now(), document.id);
-    res.json({ ok: true, url: checkout.url });
+    res.json({ url: checkout.url });
+  } catch (error) {
+    console.error('[documents:payment-link] error', error.message);
+    res.status(500).json({ error: "Le lien de paiement n'a pas pu être créé. Réessayez." });
+  }
+});
+  app.post('/api/admin/documents/:id/payment-request', requireAdmin, async (req, res) => {
+    try {
+      if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'STRIPE_SECRET_KEY doit être configurée sur Railway' });
+      if (!process.env.RESEND_API_KEY || !process.env.SEND_FROM_EMAIL) return res.status(503).json({ error: 'RESEND_API_KEY et SEND_FROM_EMAIL doivent être configurées sur Railway' });
+      const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+      if (!document) return res.status(404).json({ error: 'Document introuvable' });
+      const Stripe = require('stripe');
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+      const checkout = await stripe.checkout.sessions.create({ mode: 'payment', customer_email: document.customer_email, line_items: [{ price_data: { currency: 'eur', product_data: { name: `${document.type === 'invoice' ? 'Facture' : 'Devis'} ${document.number}` }, unit_amount: document.total_cents }, quantity: 1 }], success_url: `${process.env.PUBLIC_URL || ''}/paiement.html?success=1`, cancel_url: `${process.env.PUBLIC_URL || ''}/paiement.html?cancelled=1`, metadata: { document_id: String(document.id) } });
+      const details = JSON.parse(document.data || '{}');
+      const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+      const kind = document.type === 'invoice' ? 'facture' : 'document';
+      const html = `<p>Bonjour ${escapeEmail(document.customer_name)},</p><p>Votre ${kind} <strong>${escapeEmail(document.number)}</strong> est disponible.</p><p>Montant à régler : <strong>${(document.total_cents / 100).toFixed(2)} €</strong></p><p><a href="${checkout.url}" style="display:inline-block;padding:12px 18px;background:#6246d9;color:#fff;text-decoration:none;border-radius:6px">Régler en ligne</a></p><p>Le paiement est sécurisé par Stripe. Le détail du document peut être consulté depuis votre échange avec Thibault.</p><p>Merci,<br>${escapeEmail(details.owner_name || 'Thibault Dubois')}</p>`;
+      const emailResponse = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `Règlement ${document.number}`, html }) });
+      if (!emailResponse.ok) return res.status(502).json({ error: 'Le lien Stripe a été créé mais l’email n’a pas pu être envoyé au client' });
+      db.prepare('UPDATE documents SET stripe_session_id = ?, status = ?, updated_at = ? WHERE id = ?').run(checkout.id, 'sent', now(), document.id);
+      res.json({ ok: true, url: checkout.url });
+    } catch (error) {
+      console.error('[documents:payment-request] error', error.message);
+      res.status(500).json({ error: "La demande de règlement n'a pas pu être envoyée au client. Réessayez." });
+    }
   });
 app.post('/api/admin/documents/:id/send', requireAdmin, async (req, res) => {
-  if (!process.env.RESEND_API_KEY || !process.env.SEND_FROM_EMAIL) return res.status(503).json({ error: 'RESEND_API_KEY et SEND_FROM_EMAIL doivent être configurées sur Railway' });
-  const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
-  if (!document) return res.status(404).json({ error: 'Document introuvable' });
-  const kind = document.type === 'invoice' ? 'facture' : 'devis';
-  const details = JSON.parse(document.data || '{}');
-  const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-  const lines = (details.lines || []).map((line) => `<tr><td>${escapeEmail(line.description)}</td><td>${line.quantity}</td><td>${(line.unit_price_cents / 100).toFixed(2)} €</td><td>${(line.quantity * line.unit_price_cents / 100).toFixed(2)} €</td></tr>`).join('');
-  const html = `<p>Bonjour ${escapeEmail(document.customer_name)},</p><p>${kind[0].toUpperCase() + kind.slice(1)} <strong>${document.number}</strong></p><p><strong>Client :</strong><br>${escapeEmail(details.client_address)}</p><p><strong>Prestataire :</strong><br>${escapeEmail(details.owner_name)}<br>${escapeEmail(details.owner_address)}<br>${escapeEmail(details.owner_email)}</p><table border="1" cellpadding="8" cellspacing="0"><thead><tr><th>Prestation</th><th>Qté</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>${lines}</tbody><tfoot><tr><th colspan="3">Total</th><th>${(document.total_cents / 100).toFixed(2)} €</th></tr></tfoot></table><p>${escapeEmail(details.notes)}</p><p>Merci,<br>Thibault Dubois</p>`;
-  const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `${kind[0].toUpperCase() + kind.slice(1)} ${document.number}`, html }) });
-  if (!response.ok) return res.status(502).json({ error: 'Envoi email impossible' });
-  db.prepare("UPDATE documents SET status = 'sent', updated_at = ? WHERE id = ?").run(now(), document.id);
-  res.json({ ok: true });
+  try {
+    if (!process.env.RESEND_API_KEY || !process.env.SEND_FROM_EMAIL) return res.status(503).json({ error: 'RESEND_API_KEY et SEND_FROM_EMAIL doivent être configurées sur Railway' });
+    const document = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!document) return res.status(404).json({ error: 'Document introuvable' });
+    const kind = document.type === 'invoice' ? 'facture' : 'devis';
+    const details = JSON.parse(document.data || '{}');
+    const escapeEmail = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    const lines = (details.lines || []).map((line) => `<tr><td>${escapeEmail(line.description)}</td><td>${line.quantity}</td><td>${(line.unit_price_cents / 100).toFixed(2)} €</td><td>${(line.quantity * line.unit_price_cents / 100).toFixed(2)} €</td></tr>`).join('');
+    const html = `<p>Bonjour ${escapeEmail(document.customer_name)},</p><p>${kind[0].toUpperCase() + kind.slice(1)} <strong>${document.number}</strong></p><p><strong>Client :</strong><br>${escapeEmail(details.client_address)}</p><p><strong>Prestataire :</strong><br>${escapeEmail(details.owner_name)}<br>${escapeEmail(details.owner_address)}<br>${escapeEmail(details.owner_email)}</p><table border="1" cellpadding="8" cellspacing="0"><thead><tr><th>Prestation</th><th>Qté</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>${lines}</tbody><tfoot><tr><th colspan="3">Total</th><th>${(document.total_cents / 100).toFixed(2)} €</th></tr></tfoot></table><p>${escapeEmail(details.notes)}</p><p>Merci,<br>Thibault Dubois</p>`;
+    const response = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL, to: [document.customer_email], reply_to: process.env.CONTACT_EMAIL, subject: `${kind[0].toUpperCase() + kind.slice(1)} ${document.number}`, html }) });
+    if (!response.ok) return res.status(502).json({ error: "L'email n'a pas pu être envoyé au client. Vérifiez la configuration d'envoi (Resend) et réessayez." });
+    db.prepare("UPDATE documents SET status = 'sent', updated_at = ? WHERE id = ?").run(now(), document.id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[documents:send] error', error.message);
+    res.status(500).json({ error: "Le devis n'a pas pu être envoyé au client. Réessayez." });
+  }
 });
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, '404.html')));
+app.use((error, req, res, next) => {
+  console.error('[server] unhandled error', error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({ error: 'Une erreur interne est survenue. Réessayez dans quelques instants.' });
+});
 app.listen(port, () => console.log(`Railway server listening on port ${port} — build-marker: fix-trust-proxy-and-effort-2026-09-10`));
