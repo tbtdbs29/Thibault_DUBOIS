@@ -721,9 +721,35 @@ section { padding: 96px 0; }
   .footer-grid { grid-template-columns: 1fr 1fr; }
   section { padding: 64px 0; }
   .cta-band { padding: 48px 24px; }
-  /* Le nuage de cartes flottantes autour du cercle se chevauche sur mobile : on ne garde que le cercle. */
-  .hero-visual { max-width: 260px; }
-  .orbit-card { display: none; }
+  /* Le nuage de cartes flottantes autour du cercle déborde en absolu sur mobile : on les range en grille statique sous le cercle. */
+  .hero-visual {
+    max-width: 420px;
+    aspect-ratio: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    padding-top: 8px;
+  }
+  .hero-core {
+    grid-column: 1 / -1;
+    position: static;
+    width: 130px;
+    min-width: 0;
+    max-width: 130px;
+    margin: 0 auto 6px;
+  }
+  .orbit-card {
+    position: static;
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 0.72rem;
+    gap: 8px;
+    animation: none;
+  }
+  .orbit-card .ic { width: 28px; height: 28px; border-radius: 8px; }
+  .orbit-card svg { width: 14px; height: 14px; }
   .rotator { width: auto; min-width: 0; max-width: 100%; height: auto; overflow: visible; }
   .rotator span { white-space: normal; }
   .hero-stats { flex-wrap: wrap; row-gap: 14px; }
@@ -738,6 +764,11 @@ section { padding: 96px 0; }
   .footer-grid { grid-template-columns: 1fr; }
   .hero-stats { gap: 12px 20px; }
   .hero-stat > span { font-size: 0.72rem; }
+  .hero-visual { max-width: 300px; }
+  .hero-core { width: 110px; max-width: 110px; }
+  .orbit-card { font-size: 0.68rem; padding: 8px 10px; }
+  .orbit-card .ic { width: 24px; height: 24px; }
+  .orbit-card svg { width: 13px; height: 13px; }
 }
 
 /* ---- Mobile nav drawer ---- */
