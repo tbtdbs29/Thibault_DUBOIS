@@ -718,35 +718,23 @@ section { padding: 96px 0; }
   .footer-grid { grid-template-columns: 1fr 1fr; }
   section { padding: 64px 0; }
   .cta-band { padding: 48px 24px; }
-  .orbit-card { width: 154px; padding: 11px 12px; font-size: .76rem; gap: 8px; }
-  .orbit-card .ic { width: 30px; height: 30px; }
-  .orbit-2 { right: -2%; }
-  .orbit-3 { right: 0; }
-  .orbit-4 { left: 0; }
-  .orbit-5 { left: -2%; }
+  /* Le nuage de cartes flottantes autour du cercle se chevauche sur mobile : on ne garde que le cercle. */
+  .hero-visual { max-width: 260px; }
+  .orbit-card { display: none; }
+  .rotator { width: auto; min-width: 0; max-width: 100%; height: auto; overflow: visible; }
+  .rotator span { white-space: normal; }
+  .hero-stats { flex-wrap: wrap; row-gap: 14px; }
+  .hero-stat > span { white-space: normal; }
 }
 @media (max-width: 400px) {
   .navbar .nav-actions .btn-primary.btn-sm { display: none; }
-}
-@media (max-width: 360px) {
-  .orbit-card { display: none; }
 }
 @media (max-width: 480px) {
   .container { padding: 0 16px; }
   .form-card { padding: 24px; }
   .footer-grid { grid-template-columns: 1fr; }
-  .hero-stats { gap: 16px; }
+  .hero-stats { gap: 12px 20px; }
   .hero-stat > span { font-size: 0.72rem; }
-  .rotator { width: 23ch; min-width: 23ch; font-size: .82em; }
-  .orbit-card { width: 138px; min-height: 54px; padding: 8px 9px; font-size: .68rem; }
-  .orbit-card .ic { width: 25px; height: 25px; border-radius: 7px; }
-  .orbit-card svg { width: 14px; height: 14px; }
-  .orbit-1 { top: 2%; margin-left: -69px; }
-  .orbit-2 { top: 24%; right: -3%; }
-  .orbit-3 { bottom: 13%; right: -2%; }
-  .orbit-4 { bottom: 13%; left: -2%; }
-  .orbit-5 { top: 24%; left: -3%; }
-  .orbit-6 { bottom: 1%; margin-left: -69px; }
 }
 
 /* ---- Mobile nav drawer ---- */
