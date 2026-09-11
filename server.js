@@ -302,12 +302,21 @@ app.put('/api/admin/documents/:id', requireAdmin, (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Document introuvable' });
     const details = normalizeDocumentData(req.body);
     if (!details.lines.length) return res.status(400).json({ error: 'Ajoutez au moins une ligne au document' });
-    db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), details.total_cents, JSON.stringify(details), now(), req.params.id);
+    const status = ['request', 'archived'].includes(existing.status) ? 'draft' : existing.status;
+    db.prepare('UPDATE documents SET customer_name = ?, customer_email = ?, total_cents = ?, data = ?, status = ?, updated_at = ? WHERE id = ?').run(String(req.body.customer_name || existing.customer_name), String(req.body.customer_email || existing.customer_email), details.total_cents, JSON.stringify(details), status, now(), req.params.id);
     res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
   } catch (error) {
     console.error('[documents:update] error', error.message);
     res.status(500).json({ error: "Le devis n'a pas pu être mis à jour. Réessayez." });
   }
+});
+app.put('/api/admin/documents/:id/status', requireAdmin, (req, res) => {
+  const existing = db.prepare("SELECT * FROM documents WHERE id = ? AND type = 'quote'").get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Demande introuvable' });
+  if (!['request', 'archived'].includes(existing.status)) return res.status(409).json({ error: 'Cette demande a déjà été transformée en devis.' });
+  const status = req.body.status === 'archived' ? 'archived' : 'request';
+  db.prepare('UPDATE documents SET status = ?, updated_at = ? WHERE id = ?').run(status, now(), req.params.id);
+  res.json(db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id));
 });
 app.delete('/api/admin/documents/:id', requireAdmin, (req, res) => { db.prepare('DELETE FROM documents WHERE id = ? AND type = \'quote\'').run(req.params.id); res.status(204).end(); });
 app.post('/api/admin/documents/:id/convert', requireAdmin, (req, res) => {
