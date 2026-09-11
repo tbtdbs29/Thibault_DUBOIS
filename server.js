@@ -207,7 +207,7 @@ app.post('/api/articles/:slug/comments', async (req, res) => {
     const articleData = db.prepare('SELECT title, slug FROM articles WHERE id = ?').get(article.id);
     const kind = parentId ? 'une réponse à un commentaire' : 'un nouveau commentaire';
     const headers = { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' };
-    const sendEmail = (to, subject, html, replyTo) => fetch('https://api.resend.com/emails', { method: 'POST', headers, body: JSON.stringify({ from: process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev', to: [to], reply_to: replyTo || undefined, subject, html }) })
+    const sendEmail = (to, subject, html, replyTo) => fetch('https://api.resend.com/emails', { method: 'POST', headers, body: JSON.stringify({ from: `Site Thibault Dubois <${process.env.SEND_FROM_EMAIL || 'onboarding@resend.dev'}>`, to: [to], reply_to: replyTo || undefined, subject, html }) })
       .then(async (r) => { if (!r.ok) console.error('[comment-notification] échec envoi Resend:', r.status, await r.text().catch(() => '')); })
       .catch((error) => console.error('[comment-notification] email non envoyé:', error.message));
     const articleUrl = `${process.env.PUBLIC_URL || `http://localhost:${port}`}/article.html?slug=${encodeURIComponent(articleData.slug)}#comments`;
