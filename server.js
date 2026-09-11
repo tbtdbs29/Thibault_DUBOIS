@@ -154,6 +154,20 @@ function normalizeDocumentData(body) {
 }
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'thibault-dubois' }));
+app.get('/sitemap.xml', (req, res) => {
+  const siteUrl = 'https://www.tdubois.fr';
+  const staticPages = [
+    { path: '/', changefreq: 'monthly', priority: '1.0' },
+    { path: '/services.html', changefreq: 'monthly', priority: '0.9' },
+    { path: '/a-propos.html', changefreq: 'monthly', priority: '0.7' },
+    { path: '/contact.html', changefreq: 'monthly', priority: '0.8' },
+    { path: '/blog.html', changefreq: 'weekly', priority: '0.6' }
+  ];
+  const articles = db.prepare("SELECT slug, updated_at FROM articles WHERE status = 'published' AND published_at <= ? ORDER BY published_at DESC").all(now());
+  const urls = staticPages.map((p) => `  <url>\n    <loc>${siteUrl}${p.path}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
+    .concat(articles.map((a) => `  <url>\n    <loc>${siteUrl}/article.html?slug=${encodeURIComponent(a.slug)}</loc>\n    <lastmod>${a.updated_at.slice(0, 10)}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>`));
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`);
+});
 app.post('/api/send-quote', async (req, res) => {
   const body = req.body || {};
   const email = String(body.email || '').trim();
