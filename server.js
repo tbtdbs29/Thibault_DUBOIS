@@ -159,6 +159,7 @@ app.get('/sitemap.xml', (req, res) => {
   const staticPages = [
     { path: '/', changefreq: 'monthly', priority: '1.0' },
     { path: '/services.html', changefreq: 'monthly', priority: '0.9' },
+    { path: '/realisations.html', changefreq: 'monthly', priority: '0.8' },
     { path: '/a-propos.html', changefreq: 'monthly', priority: '0.7' },
     { path: '/contact.html', changefreq: 'monthly', priority: '0.8' },
     { path: '/blog.html', changefreq: 'weekly', priority: '0.6' }
