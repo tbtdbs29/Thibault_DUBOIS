@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
 const multer = require('multer');
 const PDFDocument = require('pdfkit');
+const RssParser = require('rss-parser');
 const path = require('path');
 const fs = require('fs');
 
@@ -50,8 +51,64 @@ function ensureSchema() {
   try { db.exec("ALTER TABLE articles ADD COLUMN faq_json TEXT NOT NULL DEFAULT '[]'"); } catch (error) {}
   try { db.exec("ALTER TABLE documents ADD COLUMN stripe_payment_intent_id TEXT"); } catch (error) {}
   db.exec(`CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, sess TEXT NOT NULL, expires INTEGER NOT NULL)`);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS news_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, category TEXT NOT NULL,
+      title TEXT NOT NULL, link TEXT NOT NULL UNIQUE, summary TEXT NOT NULL DEFAULT '',
+      tags TEXT NOT NULL DEFAULT '', published_at TEXT NOT NULL, fetched_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_published ON news_items(published_at);
+  `);
 }
 ensureSchema();
+const now = () => new Date().toISOString();
+
+/* ==========================================================================
+   Veille — agrégation d'actualité française (page privée dans /admin, jamais
+   liée depuis le site public, protégée par le même mot de passe admin).
+   Flux RSS publics, aucune clé API requise. Ne peut pas remonter dans le passé :
+   se remplit au fil du temps à partir d'aujourd'hui, purgé au-delà de ~6 mois.
+   ========================================================================== */
+const NEWS_FEEDS = [
+  { url: 'https://www.francetvinfo.fr/titres.rss', category: 'À la une' },
+  { url: 'https://www.francetvinfo.fr/politique.rss', category: 'Politique' },
+  { url: 'https://www.francetvinfo.fr/monde.rss', category: 'International' },
+  { url: 'https://www.francetvinfo.fr/societe.rss', category: 'Société' },
+  { url: 'https://www.francetvinfo.fr/culture.rss', category: 'Culture' },
+  { url: 'https://www.francetvinfo.fr/economie.rss', category: 'Économie' },
+  { url: 'https://www.francetvinfo.fr/faits-divers.rss', category: 'Faits divers' }
+];
+const NEWS_KEYWORD_TAGS = {
+  'Défense/Armée': ['armée', 'militaire', 'défense', 'otan', 'soldat', 'guerre', 'missile', 'ministère des armées', 'forces armées'],
+  'Manifestation': ['manifestation', 'manifestants', 'grève', 'cortège', 'syndicat', 'mobilisation', 'préavis de grève'],
+  'Justice': ['procès', 'tribunal', 'condamné', 'condamnation', 'juge', 'enquête judiciaire', 'perquisition'],
+  'Élections': ['élection', 'scrutin', 'candidat', 'sondage', 'second tour']
+};
+function detectNewsTags(text) {
+  const lower = text.toLowerCase();
+  return Object.entries(NEWS_KEYWORD_TAGS).filter(([, words]) => words.some((w) => lower.includes(w))).map(([tag]) => tag).join(',');
+}
+const rssParser = new RssParser({ headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TDVeilleBot/1.0)' }, timeout: 15000 });
+const insertNewsItem = db.prepare('INSERT OR IGNORE INTO news_items (source, category, title, link, summary, tags, published_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+async function fetchNewsFeeds() {
+  const ts = now();
+  for (const feed of NEWS_FEEDS) {
+    try {
+      const parsed = await rssParser.parseURL(feed.url);
+      for (const item of parsed.items || []) {
+        const title = String(item.title || '').slice(0, 300);
+        const link = String(item.link || '').slice(0, 500);
+        if (!title || !link) continue;
+        const summary = String(item.contentSnippet || item.content || '').slice(0, 500);
+        const publishedAt = item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : ts);
+        insertNewsItem.run('France Info', feed.category, title, link, summary, detectNewsTags(`${title} ${summary}`), publishedAt, ts);
+      }
+    } catch (error) { console.error(`[veille] échec récupération ${feed.url}:`, error.message); }
+  }
+  try { db.prepare("DELETE FROM news_items WHERE published_at < datetime('now', '-190 days')").run(); } catch (error) {}
+}
+fetchNewsFeeds();
+setInterval(fetchNewsFeeds, 45 * 60 * 1000).unref();
 
 // RGPD : les journaux de visite (user-agent + referrer) n'ont pas vocation à être conservés indéfiniment.
 // Purge au-delà de 13 mois — durée usuellement admise par la CNIL pour ce type de mesure d'audience.
@@ -197,7 +254,6 @@ app.use(express.static(__dirname, { index: 'index.html' }));
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de tentatives, réessayez dans quelques minutes.' } });
 
-const now = () => new Date().toISOString();
 const slugify = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90);
 const adminPassword = () => process.env.ADMIN_PASSWORD || '';
 const starterArticles = [
@@ -391,6 +447,24 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   res.json({ totalVisits, todayVisits, articles, documents, revenueCents: revenue, daily });
 });
 
+app.get('/api/admin/news', requireAdmin, (req, res) => {
+  const category = String(req.query.category || '').trim();
+  const tag = String(req.query.tag || '').trim();
+  const search = String(req.query.search || '').trim();
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 30));
+  const offset = (page - 1) * limit;
+  const conditions = ["published_at >= datetime('now', '-190 days')"];
+  const params = [];
+  if (category) { conditions.push('category = ?'); params.push(category); }
+  if (tag) { conditions.push('tags LIKE ?'); params.push(`%${tag}%`); }
+  if (search) { conditions.push('(title LIKE ? OR summary LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
+  const where = `WHERE ${conditions.join(' AND ')}`;
+  const items = db.prepare(`SELECT * FROM news_items ${where} ORDER BY published_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM news_items ${where}`).get(...params).count;
+  const categories = db.prepare('SELECT DISTINCT category FROM news_items ORDER BY category').all().map((r) => r.category);
+  res.json({ items, page, pages: Math.max(1, Math.ceil(total / limit)), total, categories, tags: Object.keys(NEWS_KEYWORD_TAGS) });
+});
 app.get('/api/admin/articles', requireAdmin, (req, res) => {
   const search = String(req.query.search || '').trim();
   const status = ['draft', 'published'].includes(req.query.status) ? req.query.status : '';

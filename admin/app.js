@@ -16,7 +16,8 @@ const state = {
   comments: { page: 1, search: '', status: '' },
   requests: { page: 1, search: '' },
   quotes: { page: 1, search: '' },
-  invoices: { page: 1, search: '' }
+  invoices: { page: 1, search: '' },
+  news: { page: 1, search: '', category: '', tag: '' }
 };
 
 function addLine(id, v = {}) {
@@ -39,7 +40,7 @@ async function load() {
   $('#revenue').textContent = (s.revenueCents / 100).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
   const max = Math.max(1, ...s.daily.map((x) => x.visits));
   $('#chart').innerHTML = s.daily.map((x) => `<div class="bar" style="height:${Math.max(3, x.visits / max * 100)}%"><small>${x.day.slice(5)}</small></div>`).join('') || '<span class="hint">Pas encore de données</span>';
-  loadArticles(); loadRequests(); loadQuotes(); loadInvoices(); loadComments(); loadMedia();
+  loadArticles(); loadRequests(); loadQuotes(); loadInvoices(); loadComments(); loadMedia(); loadNews();
 }
 function showLogin() { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); }
 $('#login-form').onsubmit = async (e) => {
@@ -82,6 +83,28 @@ async function moderate(id, status) { const r = await api('/api/admin/comments/'
 async function deleteComment(id) { if (!confirm('Supprimer définitivement ce commentaire ?')) return; const r = await api('/api/admin/comments/' + id, { method: 'DELETE' }); if (r.ok) loadComments(); }
 $('#comments-search').oninput = debounce(() => { state.comments.search = $('#comments-search').value; state.comments.page = 1; loadComments(); }, 300);
 $('#comments-status-filter').onchange = () => { state.comments.status = $('#comments-status-filter').value; state.comments.page = 1; loadComments(); };
+
+/* ---- Veille (actualité) ---- */
+let newsFiltersReady = false;
+async function loadNews() {
+  const q = new URLSearchParams({ page: state.news.page, limit: 30 });
+  if (state.news.search) q.set('search', state.news.search);
+  if (state.news.category) q.set('category', state.news.category);
+  if (state.news.tag) q.set('tag', state.news.tag);
+  const d = await (await api('/api/admin/news?' + q)).json();
+  if (!newsFiltersReady) {
+    const catSel = $('#news-category-filter');
+    d.categories.forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o); });
+    const tagSel = $('#news-tag-filter');
+    d.tags.forEach((t) => { const o = document.createElement('option'); o.value = t; o.textContent = t; tagSel.appendChild(o); });
+    newsFiltersReady = true;
+  }
+  $('#news-list').innerHTML = d.items.map((n) => `<div class="item" style="align-items:flex-start"><div style="min-width:0"><strong><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a></strong><small>${esc(n.category)}${n.tags ? ' · ' + esc(n.tags).split(',').join(', ') : ''} · ${new Date(n.published_at).toLocaleString('fr-FR')}</small>${n.summary ? `<p class="hint" style="margin:6px 0 0">${esc(n.summary)}</p>` : ''}</div></div>`).join('') || '<span class="hint">Aucune actualité collectée pour le moment (le premier passage des flux peut prendre quelques minutes après le démarrage du serveur).</span>';
+  renderPager('news-pager', d.page, d.pages, (p) => { state.news.page = p; loadNews(); });
+}
+$('#news-search').oninput = debounce(() => { state.news.search = $('#news-search').value; state.news.page = 1; loadNews(); }, 300);
+$('#news-category-filter').onchange = () => { state.news.category = $('#news-category-filter').value; state.news.page = 1; loadNews(); };
+$('#news-tag-filter').onchange = () => { state.news.tag = $('#news-tag-filter').value; state.news.page = 1; loadNews(); };
 
 /* ---- Documents : demandes / devis / factures ---- */
 function renderDocItem(d, quote) {
