@@ -448,6 +448,7 @@ section { padding: 96px 0; }
 .check-list svg { width: 18px; height: 18px; color: var(--color-success); flex-shrink: 0; margin-top: 2px; }
 .card-badge {
   position: absolute; top: -12px; right: 20px;
+  z-index: 2;
   background: var(--color-accent); color: #04252a;
   font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   padding: 5px 12px; border-radius: var(--radius-full);
@@ -459,11 +460,23 @@ section { padding: 96px 0; }
 .project-row.reverse { grid-template-columns: 0.8fr 1.2fr; }
 .project-row.reverse .project-media { order: 2; }
 .project-row.reverse .project-info { order: 1; }
+.project-media {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  transition: box-shadow .3s var(--ease-out), border-color .3s var(--ease-out);
+}
 .project-media img {
   width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: top;
-  border-radius: var(--radius-md); border: 1px solid var(--color-border); box-shadow: var(--shadow-md);
   display: block;
+  transition: transform .5s var(--ease-out);
 }
+.project-media:hover {
+  box-shadow: var(--shadow-lg);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+}
+.project-media:hover img { transform: scale(1.035); }
 .project-info h3 { margin-bottom: 10px; }
 .project-info p { color: var(--color-text-muted); font-size: 1rem; }
 .project-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 22px; }
@@ -643,6 +656,73 @@ section { padding: 96px 0; }
 .cta-band .btn-secondary { background: #fff; color: var(--color-primary-dark); border-color: transparent; }
 .cta-band .btn-ghost { color: #fff; }
 .cta-band .btn-ghost:hover { color: #fff; opacity: .8; }
+
+/* ==========================================================================
+   Accents — spotlight cards, animated border beam, marquee, tilt
+   Progressive-enhancement only: every rule degrades to the plain .card /
+   .trust-bar look on browsers that don't support @property or mask-composite.
+   ========================================================================== */
+
+/* ---- Spotlight: cursor-tracked glow, JS sets --x/--y in main.js ----
+   Host element must already be positioned (relative/sticky/absolute) —
+   every current use-site (.card, .avatar-card) already is. */
+.has-spotlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(260px circle at var(--x, 50%) var(--y, 50%), color-mix(in srgb, var(--color-primary) 18%, transparent), transparent 65%);
+  opacity: 0;
+  transition: opacity .5s var(--ease-out);
+  pointer-events: none;
+}
+.has-spotlight:hover::before,
+.has-spotlight:focus-within::before { opacity: 1; }
+
+/* ---- Border beam: a light chasing the card edge ---- */
+@property --beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.has-beam::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--beam-angle), transparent 0 72%, var(--color-accent), var(--color-primary), transparent 92% 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: beam-spin 6s linear infinite;
+}
+.has-beam.beam-light::after {
+  background: conic-gradient(from var(--beam-angle), transparent 0 72%, #fff, rgba(255,255,255,.6), transparent 92% 100%);
+}
+@keyframes beam-spin { to { --beam-angle: 360deg; } }
+@media (prefers-reduced-motion: reduce) {
+  .has-beam::after { animation: none; }
+}
+
+/* ---- Bento grid: asymmetric services layout ---- */
+.services-bento {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  grid-auto-rows: 1fr;
+  gap: 20px;
+}
+.services-bento .card:nth-child(1) { grid-column: 1; grid-row: 1; }
+.services-bento .card:nth-child(2) { grid-column: 2; grid-row: 1 / span 2; display: flex; flex-direction: column; justify-content: center; }
+.services-bento .card:nth-child(3) { grid-column: 1; grid-row: 2; }
+@media (max-width: 860px) {
+  .services-bento { grid-template-columns: 1fr; }
+  .services-bento .card:nth-child(1),
+  .services-bento .card:nth-child(2),
+  .services-bento .card:nth-child(3) { grid-column: 1; grid-row: auto; }
+}
 
 /* ---- Footer ---- */
 .site-footer { border-top: 1px solid var(--color-border); padding: 56px 0 28px; background: var(--color-bg-alt); }

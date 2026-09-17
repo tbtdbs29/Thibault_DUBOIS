@@ -14,35 +14,86 @@ const port = Number(process.env.PORT || 3000);
 const dataDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 const uploadDir = path.join(dataDir, 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
-const db = new Database(path.join(dataDir, 'site.sqlite'));
-db.pragma('journal_mode = WAL');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS articles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
-    excerpt TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', cover_image TEXT NOT NULL DEFAULT '',
-    seo_title TEXT NOT NULL DEFAULT '', seo_description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft',
-    published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS visits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, referrer TEXT NOT NULL DEFAULT '',
-    user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, number TEXT NOT NULL, customer_name TEXT NOT NULL,
-    customer_email TEXT NOT NULL, total_cents INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'draft',
-    data TEXT NOT NULL DEFAULT '{}', stripe_session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, article_id INTEGER NOT NULL, author_name TEXT NOT NULL,
-    author_email TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-    parent_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
-    FOREIGN KEY(parent_id) REFERENCES comments(id) ON DELETE CASCADE
-  );
-`);
-try { db.exec('ALTER TABLE comments ADD COLUMN parent_id INTEGER'); } catch (error) {}
-try { db.exec("ALTER TABLE articles ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1"); } catch (error) {}
-try { db.exec("ALTER TABLE articles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''"); } catch (error) {}
-try { db.exec("ALTER TABLE articles ADD COLUMN faq_json TEXT NOT NULL DEFAULT '[]'"); } catch (error) {}
+const dbPath = path.join(dataDir, 'site.sqlite');
+let db = new Database(dbPath);
+
+// Regroupé dans une fonction : ré-exécuté après une restauration de sauvegarde pour garantir
+// que la base restaurée (potentiellement plus ancienne) ait bien toutes les tables/colonnes attendues.
+function ensureSchema() {
+  db.pragma('journal_mode = WAL');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS articles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT UNIQUE NOT NULL, title TEXT NOT NULL,
+      excerpt TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', cover_image TEXT NOT NULL DEFAULT '',
+      seo_title TEXT NOT NULL DEFAULT '', seo_description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft',
+      published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS visits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, referrer TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, number TEXT NOT NULL, customer_name TEXT NOT NULL,
+      customer_email TEXT NOT NULL, total_cents INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'draft',
+      data TEXT NOT NULL DEFAULT '{}', stripe_session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, article_id INTEGER NOT NULL, author_name TEXT NOT NULL,
+      author_email TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+      parent_id INTEGER, created_at TEXT NOT NULL, FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
+      FOREIGN KEY(parent_id) REFERENCES comments(id) ON DELETE CASCADE
+    );
+  `);
+  try { db.exec('ALTER TABLE comments ADD COLUMN parent_id INTEGER'); } catch (error) {}
+  try { db.exec("ALTER TABLE articles ADD COLUMN content_version INTEGER NOT NULL DEFAULT 1"); } catch (error) {}
+  try { db.exec("ALTER TABLE articles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''"); } catch (error) {}
+  try { db.exec("ALTER TABLE articles ADD COLUMN faq_json TEXT NOT NULL DEFAULT '[]'"); } catch (error) {}
+  try { db.exec("ALTER TABLE documents ADD COLUMN stripe_payment_intent_id TEXT"); } catch (error) {}
+  db.exec(`CREATE TABLE IF NOT EXISTS sessions (sid TEXT PRIMARY KEY, sess TEXT NOT NULL, expires INTEGER NOT NULL)`);
+}
+ensureSchema();
+
+// RGPD : les journaux de visite (user-agent + referrer) n'ont pas vocation à être conservés indéfiniment.
+// Purge au-delà de 13 mois — durée usuellement admise par la CNIL pour ce type de mesure d'audience.
+function purgeOldVisits() {
+  try {
+    const cutoff = new Date(Date.now() - 396 * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare('DELETE FROM visits WHERE created_at < ?').run(cutoff);
+  } catch (error) { console.error('[visits:purge] error', error.message); }
+}
+purgeOldVisits();
+setInterval(purgeOldVisits, 24 * 60 * 60 * 1000).unref();
+
+// Store de session persistant (survit aux redémarrages Railway) — pas de dépendance supplémentaire,
+// on réutilise la même base SQLite que le reste de l'application.
+class SqliteSessionStore extends session.Store {
+  get(sid, callback) {
+    try {
+      const row = db.prepare('SELECT sess, expires FROM sessions WHERE sid = ?').get(sid);
+      if (!row || row.expires < Date.now()) return callback(null, null);
+      callback(null, JSON.parse(row.sess));
+    } catch (error) { callback(error); }
+  }
+  set(sid, sess, callback) {
+    try {
+      const expires = sess.cookie && sess.cookie.expires ? new Date(sess.cookie.expires).getTime() : Date.now() + 8 * 60 * 60 * 1000;
+      db.prepare('INSERT INTO sessions (sid, sess, expires) VALUES (?, ?, ?) ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expires = excluded.expires').run(sid, JSON.stringify(sess), expires);
+      callback && callback(null);
+    } catch (error) { callback && callback(error); }
+  }
+  destroy(sid, callback) {
+    try { db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid); callback && callback(null); } catch (error) { callback && callback(error); }
+  }
+  touch(sid, sess, callback) { this.set(sid, sess, callback); }
+}
+setInterval(() => { try { db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now()); } catch (error) {} }, 60 * 60 * 1000).unref();
+
+if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
+  console.error('[server] ATTENTION : SESSION_SECRET n\'est pas défini en production — un secret par défaut non sûr est utilisé. Définissez SESSION_SECRET sur Railway.');
+}
+if (process.env.NODE_ENV === 'production' && process.env.ADMIN_PASSWORD && !process.env.ADMIN_PASSWORD.startsWith('$2')) {
+  console.error('[server] ATTENTION : ADMIN_PASSWORD n\'est pas un hash bcrypt (mot de passe en clair) — voir GUIDE_AVANT_LANCEMENT.md pour le hasher.');
+}
 
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   if (!process.env.STRIPE_WEBHOOK_SECRET) return res.status(503).end();
@@ -50,20 +101,101 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
   let event;
   try { event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET); } catch (error) { return res.status(400).send(`Webhook Error: ${error.message}`); }
-  if (event.type === 'checkout.session.completed') db.prepare("UPDATE documents SET status = 'paid', updated_at = ? WHERE stripe_session_id = ?").run(now(), event.data.object.id);
+  try {
+    const ts = now();
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      db.prepare("UPDATE documents SET status = 'paid', stripe_payment_intent_id = ?, updated_at = ? WHERE stripe_session_id = ?").run(session.payment_intent || null, ts, session.id);
+    } else if (event.type === 'checkout.session.expired') {
+      const session = event.data.object;
+      db.prepare("UPDATE documents SET status = 'expired', updated_at = ? WHERE stripe_session_id = ? AND status = 'sent'").run(ts, session.id);
+    } else if (event.type === 'checkout.session.async_payment_failed') {
+      const session = event.data.object;
+      db.prepare("UPDATE documents SET status = 'payment_failed', updated_at = ? WHERE stripe_session_id = ? AND status = 'sent'").run(ts, session.id);
+    } else if (event.type === 'charge.refunded') {
+      const charge = event.data.object;
+      if (charge.payment_intent) db.prepare("UPDATE documents SET status = 'refunded', updated_at = ? WHERE stripe_payment_intent_id = ? AND status = 'paid'").run(ts, charge.payment_intent);
+    }
+  } catch (error) { console.error('[stripe:webhook] error', error.message); }
   res.json({ received: true });
+});
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // CSP allégée, valable pour tout le site : ne restreint pas script-src/style-src (plusieurs pages publiques
+  // reposent encore sur des <script> inline), mais bloque déjà les vecteurs sans coût de compatibilité.
+  res.setHeader('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  next();
 });
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
+  store: new SqliteSessionStore(),
   secret: process.env.SESSION_SECRET || 'change-this-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 }
 }));
+app.get(['/admin', '/admin/'], (req, res) => {
+  // CSP stricte sur le back office uniquement : son JS a été extrait dans admin/app.js (fichier externe),
+  // ce qui permet un script-src 'self' sans 'unsafe-inline' — le reste du site en dépend encore, voir plus haut.
+  // Doit être déclaré avant express.static ci-dessous : sinon la redirection automatique de /admin vers /admin/
+  // (dossier avec index.html) court-circuite cette route et sa CSP n'est jamais appliquée.
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+  res.sendFile(path.join(__dirname, 'admin', 'index.html'));
+});
+
+// Page privée non référencée (chemin secret via variable d'environnement, jamais committé).
+// Protégée par la même session admin que /admin. Le contenu HTML est stocké sur le volume Railway
+// (hors dépôt git, qui est public) afin de ne jamais exposer son contenu dans le code source.
+const newsReportPath = String(process.env.NEWS_REPORT_PATH || '').replace(/^\/+|\/+$/g, '').trim();
+if (newsReportPath) {
+  const privateReportFile = path.join(dataDir, 'private-report.html');
+  const privateReportEditor = (existingHtml) => `<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow, noarchive"><title>Édition — rapport privé</title>
+<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:40px auto;padding:0 20px;color:#1a1a1a}textarea{width:100%;height:65vh;font-family:ui-monospace,monospace;font-size:13px;padding:12px;box-sizing:border-box}button{margin-top:12px;padding:10px 20px;font-size:15px;cursor:pointer}#msg{margin-left:12px}</style>
+</head><body>
+<h1>Contenu du rapport privé</h1>
+<p>Colle ici le code HTML complet du rapport puis enregistre. Cette page n'est ni liée depuis le site, ni indexée, ni référencée dans le sitemap ou robots.txt : garde son adresse pour toi seul.</p>
+<textarea id="html" placeholder="Colle ici le HTML du rapport...">${existingHtml.replace(/</g, '&lt;')}</textarea><br>
+<button id="save">Enregistrer</button><span id="msg"></span>
+<script>
+document.getElementById('save').addEventListener('click', async () => {
+  const html = document.getElementById('html').value;
+  const res = await fetch(location.pathname + '/__save', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html }) });
+  if (res.ok) location.href = '.'; else { const data = await res.json().catch(() => ({})); document.getElementById('msg').textContent = 'Erreur : ' + (data.error || res.status); }
+});
+</script></body></html>`;
+  app.get(['/' + newsReportPath, '/' + newsReportPath + '/'], (req, res) => {
+    res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    res.set('Cache-Control', 'no-store');
+    if (!req.session.admin) return res.redirect('/admin');
+    try { return res.type('html').send(fs.readFileSync(privateReportFile, 'utf8')); }
+    catch (error) { return res.type('html').send(privateReportEditor('')); }
+  });
+  app.get('/' + newsReportPath + '/edit', requireAdmin, (req, res) => {
+    res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    let existing = '';
+    try { existing = fs.readFileSync(privateReportFile, 'utf8'); } catch (error) {}
+    res.type('html').send(privateReportEditor(existing));
+  });
+  app.put('/' + newsReportPath + '/edit/__save', requireAdmin, express.json({ limit: '10mb' }), (req, res) => {
+    try {
+      fs.writeFileSync(privateReportFile, String((req.body && req.body.html) || ''), 'utf8');
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[private-report:save] error', error.message);
+      res.status(500).json({ error: 'Écriture impossible' });
+    }
+  });
+}
 app.use('/uploads', express.static(uploadDir));
 app.use(express.static(__dirname, { index: 'index.html' }));
 app.use('/api', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Trop de tentatives, réessayez dans quelques minutes.' } });
 
 const now = () => new Date().toISOString();
 const slugify = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 90);
@@ -236,7 +368,7 @@ app.post('/api/articles/:slug/comments', async (req, res) => {
   res.status(201).json({ ok: true, id: result.lastInsertRowid, message: 'Votre commentaire sera visible après modération.' });
 });
 
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', loginLimiter, async (req, res) => {
   if (!adminPassword()) return res.status(503).json({ error: 'ADMIN_PASSWORD doit être configuré sur Railway' });
   const configured = adminPassword();
   const valid = configured.startsWith('$2') ? await bcrypt.compare(String(req.body.password || ''), configured) : String(req.body.password || '') === configured;
@@ -259,8 +391,36 @@ app.get('/api/admin/stats', requireAdmin, (req, res) => {
   res.json({ totalVisits, todayVisits, articles, documents, revenueCents: revenue, daily });
 });
 
-app.get('/api/admin/articles', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM articles ORDER BY updated_at DESC').all()));
-app.get('/api/admin/comments', requireAdmin, (req, res) => res.json(db.prepare('SELECT comments.*, articles.title AS article_title FROM comments JOIN articles ON articles.id = comments.article_id ORDER BY comments.created_at DESC').all()));
+app.get('/api/admin/articles', requireAdmin, (req, res) => {
+  const search = String(req.query.search || '').trim();
+  const status = ['draft', 'published'].includes(req.query.status) ? req.query.status : '';
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+  const offset = (page - 1) * limit;
+  const conditions = [];
+  const params = [];
+  if (search) { conditions.push('(title LIKE ? OR slug LIKE ? OR keywords LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  if (status) { conditions.push('status = ?'); params.push(status); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const items = db.prepare(`SELECT * FROM articles ${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM articles ${where}`).get(...params).count;
+  res.json({ items, page, pages: Math.max(1, Math.ceil(total / limit)), total });
+});
+app.get('/api/admin/comments', requireAdmin, (req, res) => {
+  const search = String(req.query.search || '').trim();
+  const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : '';
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
+  const offset = (page - 1) * limit;
+  const conditions = [];
+  const params = [];
+  if (search) { conditions.push('(comments.author_name LIKE ? OR comments.body LIKE ? OR articles.title LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  if (status) { conditions.push('comments.status = ?'); params.push(status); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const items = db.prepare(`SELECT comments.*, articles.title AS article_title FROM comments JOIN articles ON articles.id = comments.article_id ${where} ORDER BY comments.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM comments JOIN articles ON articles.id = comments.article_id ${where}`).get(...params).count;
+  res.json({ items, page, pages: Math.max(1, Math.ceil(total / limit)), total });
+});
 app.put('/api/admin/comments/:id', requireAdmin, (req, res) => {
   const status = ['pending', 'approved', 'rejected'].includes(req.body.status) ? req.body.status : 'pending';
   db.prepare('UPDATE comments SET status = ? WHERE id = ?').run(status, req.params.id);
@@ -273,8 +433,8 @@ app.post('/api/admin/articles', requireAdmin, (req, res) => {
   const timestamp = now();
   const slug = slugify(req.body.slug || title);
   try {
-    const result = db.prepare(`INSERT INTO articles (slug, title, excerpt, body, cover_image, seo_title, seo_description, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(slug, title, String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || title), String(req.body.seo_description || req.body.excerpt || ''), req.body.status === 'published' ? 'published' : 'draft', req.body.published_at ? new Date(req.body.published_at).toISOString() : (req.body.status === 'published' ? timestamp : null), timestamp, timestamp);
+    const result = db.prepare(`INSERT INTO articles (slug, title, excerpt, body, cover_image, seo_title, seo_description, keywords, status, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(slug, title, String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || title), String(req.body.seo_description || req.body.excerpt || ''), String(req.body.keywords || ''), req.body.status === 'published' ? 'published' : 'draft', req.body.published_at ? new Date(req.body.published_at).toISOString() : (req.body.status === 'published' ? timestamp : null), timestamp, timestamp);
     res.status(201).json(db.prepare('SELECT * FROM articles WHERE id = ?').get(result.lastInsertRowid));
   } catch (error) { res.status(409).json({ error: 'Ce slug existe déjà' }); }
 });
@@ -283,8 +443,8 @@ app.put('/api/admin/articles/:id', requireAdmin, (req, res) => {
   if (!current) return res.status(404).json({ error: 'Article introuvable' });
   const status = req.body.status === 'published' ? 'published' : 'draft';
   const publishedAt = req.body.published_at ? new Date(req.body.published_at).toISOString() : (status === 'published' ? (current.published_at || now()) : null);
-  db.prepare(`UPDATE articles SET slug = ?, title = ?, excerpt = ?, body = ?, cover_image = ?, seo_title = ?, seo_description = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?`)
-    .run(slugify(req.body.slug || req.body.title), String(req.body.title || ''), String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || req.body.title || ''), String(req.body.seo_description || req.body.excerpt || ''), status, publishedAt, now(), req.params.id);
+  db.prepare(`UPDATE articles SET slug = ?, title = ?, excerpt = ?, body = ?, cover_image = ?, seo_title = ?, seo_description = ?, keywords = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?`)
+    .run(slugify(req.body.slug || req.body.title), String(req.body.title || ''), String(req.body.excerpt || ''), String(req.body.body || ''), String(req.body.cover_image || ''), String(req.body.seo_title || req.body.title || ''), String(req.body.seo_description || req.body.excerpt || ''), String(req.body.keywords || current.keywords || ''), status, publishedAt, now(), req.params.id);
   res.json(db.prepare('SELECT * FROM articles WHERE id = ?').get(req.params.id));
 });
 app.delete('/api/admin/articles/:id', requireAdmin, (req, res) => {
@@ -297,8 +457,69 @@ app.post('/api/admin/uploads', requireAdmin, upload.single('image'), (req, res) 
   if (!req.file) return res.status(400).json({ error: 'Image JPEG, PNG, WebP ou GIF requise' });
   res.status(201).json({ url: `/uploads/${req.file.filename}` });
 });
+app.get('/api/admin/uploads', requireAdmin, (req, res) => {
+  try {
+    const files = fs.readdirSync(uploadDir)
+      .filter((name) => !name.startsWith('.'))
+      .map((name) => {
+        const stat = fs.statSync(path.join(uploadDir, name));
+        return { name, url: `/uploads/${name}`, size: stat.size, created_at: stat.birthtime.toISOString() };
+      })
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    res.json(files);
+  } catch (error) { res.status(500).json({ error: 'Impossible de lister les fichiers.' }); }
+});
+app.delete('/api/admin/uploads/:name', requireAdmin, (req, res) => {
+  const name = path.basename(String(req.params.name || ''));
+  const target = path.join(uploadDir, name);
+  if (!target.startsWith(uploadDir) || !fs.existsSync(target)) return res.status(404).json({ error: 'Fichier introuvable' });
+  try { fs.unlinkSync(target); res.status(204).end(); } catch (error) { res.status(500).json({ error: 'Suppression impossible' }); }
+});
 
-app.get('/api/admin/documents', requireAdmin, (req, res) => res.json(db.prepare('SELECT * FROM documents ORDER BY created_at DESC').all().map((item) => ({ ...item, data: JSON.parse(item.data) }))));
+app.get('/api/admin/documents', requireAdmin, (req, res) => {
+  const type = ['quote', 'invoice'].includes(req.query.type) ? req.query.type : '';
+  const search = String(req.query.search || '').trim();
+  const statusList = String(req.query.status || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const excludeStatusList = String(req.query.exclude_status || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+  const offset = (page - 1) * limit;
+  const conditions = [];
+  const params = [];
+  if (type) { conditions.push('type = ?'); params.push(type); }
+  if (statusList.length) { conditions.push(`status IN (${statusList.map(() => '?').join(',')})`); params.push(...statusList); }
+  if (excludeStatusList.length) { conditions.push(`status NOT IN (${excludeStatusList.map(() => '?').join(',')})`); params.push(...excludeStatusList); }
+  if (search) { conditions.push('(customer_name LIKE ? OR customer_email LIKE ? OR number LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const items = db.prepare(`SELECT * FROM documents ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset).map((item) => ({ ...item, data: JSON.parse(item.data) }));
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM documents ${where}`).get(...params).count;
+  res.json({ items, page, pages: Math.max(1, Math.ceil(total / limit)), total });
+});
+app.get('/api/admin/export/documents.csv', requireAdmin, (req, res) => {
+  const rows = db.prepare('SELECT * FROM documents ORDER BY created_at ASC').all();
+  const escCsv = (value) => { const s = String(value ?? ''); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const statusLabel = { draft: 'Brouillon', request: 'Demande', archived: 'Archivée', converted: 'Convertie', sent: 'Envoyée', paid: 'Payée', expired: 'Expirée', payment_failed: 'Paiement échoué', refunded: 'Remboursée' };
+  const header = ['Numéro', 'Type', 'Statut', 'Client', 'Email', 'Date de création', 'Dernière mise à jour', 'Sous-total HT (EUR)', 'TVA (EUR)', 'Total TTC (EUR)'];
+  const lines = rows.map((r) => {
+    const details = JSON.parse(r.data || '{}');
+    return [
+      r.number,
+      r.type === 'invoice' ? 'Facture' : 'Devis',
+      statusLabel[r.status] || r.status,
+      r.customer_name,
+      r.customer_email,
+      r.created_at.slice(0, 10),
+      r.updated_at.slice(0, 10),
+      ((details.subtotal_cents ?? r.total_cents) / 100).toFixed(2),
+      ((details.vat_cents || 0) / 100).toFixed(2),
+      (r.total_cents / 100).toFixed(2)
+    ].map(escCsv).join(';');
+  });
+  const csv = `﻿${header.join(';')}\n${lines.join('\n')}\n`;
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="documents-${now().slice(0, 10)}.csv"`);
+  res.send(csv);
+});
 app.post('/api/admin/documents', requireAdmin, (req, res) => {
   try {
     const type = req.body.type === 'invoice' ? 'invoice' : 'quote';
@@ -477,11 +698,64 @@ app.post('/api/admin/documents/:id/send', requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Le devis n'a pas pu être envoyé au client. Réessayez." });
   }
 });
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
+const restoreTmpDir = path.join(dataDir, 'tmp-restore');
+fs.mkdirSync(restoreTmpDir, { recursive: true });
+const restoreUpload = multer({ dest: restoreTmpDir, limits: { fileSize: 200 * 1024 * 1024 } });
+
+app.get('/api/admin/backup', requireAdmin, async (req, res) => {
+  const tmpPath = path.join(dataDir, `backup-tmp-${Date.now()}.sqlite`);
+  try {
+    await db.backup(tmpPath);
+    res.download(tmpPath, `tdubois-backup-${now().slice(0, 10)}.sqlite`, (error) => {
+      fs.unlink(tmpPath, () => {});
+      if (error && !res.headersSent) console.error('[backup] download error', error.message);
+    });
+  } catch (error) {
+    fs.unlink(tmpPath, () => {});
+    console.error('[backup] error', error.message);
+    res.status(500).json({ error: 'La sauvegarde a échoué.' });
+  }
+});
+app.post('/api/admin/restore', requireAdmin, restoreUpload.single('backup'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Fichier de sauvegarde (.sqlite) requis' });
+  const cleanup = () => fs.unlink(req.file.path, () => {});
+  if (req.body.confirm !== 'RESTAURER') { cleanup(); return res.status(400).json({ error: 'Confirmation requise : tapez RESTAURER pour valider.' }); }
+  try {
+    const header = Buffer.alloc(16);
+    const fd = fs.openSync(req.file.path, 'r');
+    fs.readSync(fd, header, 0, 16, 0);
+    fs.closeSync(fd);
+    if (header.toString('utf8', 0, 15) !== 'SQLite format 3') throw new Error('Ce fichier ne semble pas être une base SQLite valide.');
+    const TestDatabase = require('better-sqlite3');
+    const testDb = new TestDatabase(req.file.path, { readonly: true });
+    let check, hasTables;
+    try {
+      check = testDb.pragma('integrity_check', { simple: true });
+      hasTables = testDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('articles','documents','comments')").all().length === 3;
+    } finally { testDb.close(); }
+    if (check !== 'ok' || !hasTables) throw new Error('Le fichier ne contient pas les tables attendues ou est corrompu.');
+
+    // Copie de sécurité de la base actuelle avant écrasement — permet d'annuler une restauration ratée.
+    const safetyName = `pre-restore-${Date.now()}.sqlite`;
+    fs.copyFileSync(dbPath, path.join(dataDir, safetyName));
+
+    db.close();
+    fs.copyFileSync(req.file.path, dbPath);
+    cleanup();
+    db = new Database(dbPath);
+    ensureSchema();
+    res.json({ ok: true, message: `Base restaurée avec succès. Une copie de l'ancienne base a été conservée sur le volume : ${safetyName}` });
+  } catch (error) {
+    cleanup();
+    console.error('[restore] error', error.message);
+    res.status(400).json({ error: error.message || 'La restauration a échoué.' });
+  }
+});
+
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, '404.html')));
 app.use((error, req, res, next) => {
   console.error('[server] unhandled error', error);
   if (res.headersSent) return next(error);
   res.status(500).json({ error: 'Une erreur interne est survenue. Réessayez dans quelques instants.' });
 });
-app.listen(port, () => console.log(`Railway server listening on port ${port} — build-marker: fix-trust-proxy-and-effort-2026-09-10`));
+app.listen(port, () => console.log(`Railway server listening on port ${port}`));

@@ -106,6 +106,17 @@
     }
   }
 
+  /* ---- Spotlight cards: track cursor position for the radial glow ---- */
+  var spotlightEls = document.querySelectorAll('.has-spotlight');
+  spotlightEls.forEach(function (el) {
+    el.addEventListener('pointermove', function (e) {
+      var rect = el.getBoundingClientRect();
+      el.style.setProperty('--x', (e.clientX - rect.left) + 'px');
+      el.style.setProperty('--y', (e.clientY - rect.top) + 'px');
+    });
+  });
+
+
   /* ---- Privacy-friendly page analytics ---- */
   try {
     navigator.sendBeacon('/api/analytics', new Blob([JSON.stringify({ path: window.location.pathname, referrer: document.referrer })], { type: 'application/json' }));
